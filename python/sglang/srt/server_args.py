@@ -137,6 +137,9 @@ class ServerArgs:
     max_loras_per_batch: int = 8
     lora_backend: str = "triton"
 
+    # Zip2Zip
+    zip2zip_path: Optional[str] = None
+
     # Kernel backend
     attention_backend: Optional[str] = None
     sampling_backend: Optional[str] = None

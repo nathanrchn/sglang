@@ -294,6 +294,9 @@ class ModelRunner:
         if self.tp_size > 1 and supports_torch_tp:
             self.apply_torch_tp()
 
+        if server_args.zip2zip_path is not None:
+            self.init_zip2zip()
+
         # Init lora
         # TODO (lifuhuang): when we support dynamic LoRA loading / unloading, we should add
         # a new server arg `enable_lora` to control whether to init LoRA manager to be more
@@ -871,6 +874,9 @@ class ModelRunner:
         except Exception as e:
             logger.error(f"Error when getting parameter {name}: {e}")
             return None
+        
+    def init_zip2zip(self):
+        pass
 
     def init_lora_manager(self):
         self.lora_manager = LoRAManager(
