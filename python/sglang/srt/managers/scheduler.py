@@ -161,6 +161,7 @@ from sglang.srt.utils import (
     suppress_other_loggers,
 )
 from sglang.utils import TypeBasedDispatcher, get_exception_traceback
+from sglang.srt.zip2zip.utils import get_zip2zip_tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -556,6 +557,12 @@ class Scheduler(
                     trust_remote_code=server_args.trust_remote_code,
                     revision=server_args.revision,
                 )
+
+                if server_args.zip2zip_path is not None:
+                    self.tokenizer = get_zip2zip_tokenizer(
+                        server_args.zip2zip_path,
+                        self.tokenizer,
+                    )
 
     def init_memory_pool_and_cache(self):
         server_args = self.server_args

@@ -43,6 +43,7 @@ from sglang.utils import (
     find_printable_text,
     get_exception_traceback,
 )
+from sglang.srt.zip2zip.utils import get_zip2zip_tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,12 @@ class DetokenizerManager:
                 trust_remote_code=server_args.trust_remote_code,
                 revision=server_args.revision,
             )
+
+            if server_args.zip2zip_path is not None:
+                self.tokenizer = get_zip2zip_tokenizer(
+                    server_args.zip2zip_path,
+                    self.tokenizer,
+                )
 
         self.decode_status = LimitedCapacityDict(capacity=DETOKENIZER_MAX_STATES)
         self.is_dummy = server_args.load_format == "dummy"

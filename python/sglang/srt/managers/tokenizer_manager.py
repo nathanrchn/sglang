@@ -122,6 +122,7 @@ from sglang.srt.utils import (
     kill_process_tree,
 )
 from sglang.utils import TypeBasedDispatcher, get_exception_traceback
+from sglang.srt.zip2zip.utils import get_zip2zip_tokenizer
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
@@ -241,6 +242,12 @@ class TokenizerManager:
                     trust_remote_code=server_args.trust_remote_code,
                     revision=server_args.revision,
                 )
+
+                if server_args.zip2zip_path is not None:
+                    self.tokenizer = get_zip2zip_tokenizer(
+                        server_args.zip2zip_path,
+                        self.tokenizer,
+                    )
 
         # Initialize loaded loRA adapters with the initial lora paths in the server_args.
         # This list will be updated when new LoRA adapters are loaded or unloaded dynamically.
