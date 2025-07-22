@@ -28,7 +28,9 @@ class Zip2ZipModel(nn.Module):
         self.device = self.base_model.device
         self.config = Zip2ZipConfig.from_pretrained(zip2zip_path)
 
-        self.manager = Zip2ZipManager(self.config, self.dtype, self.device)
+        self.manager = Zip2ZipManager(
+            self.config, self.dtype, self.device, zip2zip_path
+        )
 
     @torch.no_grad()
     def forward(

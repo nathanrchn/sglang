@@ -43,7 +43,7 @@ from sglang.utils import (
     find_printable_text,
     get_exception_traceback,
 )
-from sglang.srt.zip2zip.utils import get_zip2zip_tokenizer
+from sglang.srt.zip2zip.utils import get_lzw_compressor
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +93,9 @@ class DetokenizerManager:
                 revision=server_args.revision,
             )
 
+            self.compressor = None
             if server_args.zip2zip_path is not None:
-                self.tokenizer = get_zip2zip_tokenizer(
-                    server_args.zip2zip_path,
-                    self.tokenizer,
-                )
+                self.compressor = get_lzw_compressor(server_args.zip2zip_path, self.tokenizer)
 
         self.decode_status = LimitedCapacityDict(capacity=DETOKENIZER_MAX_STATES)
         self.is_dummy = server_args.load_format == "dummy"
@@ -147,6 +145,7 @@ class DetokenizerManager:
     def handle_batch_token_id_out(self, recv_obj: BatchTokenIDOut):
         bs = len(recv_obj.rids)
 
+        decode_ids_lengths = []
         # Initialize decode status
         read_ids, surr_ids = [], []
         for i in range(bs):
@@ -163,14 +162,19 @@ class DetokenizerManager:
                 s = self.decode_status[rid]
                 s.decode_ids.extend(recv_obj.decode_ids[i])
 
+            decode_ids = s.decode_ids
+            if self.compressor is not None:
+                decode_ids, _ = self.compressor.decode(decode_ids)
+
+            decode_ids_lengths.append(len(decode_ids))
             read_ids.append(
                 self.trim_matched_stop(
-                    s.decode_ids[s.surr_offset :],
+                    decode_ids[s.surr_offset :],
                     recv_obj.finished_reasons[i],
                     recv_obj.no_stop_trim[i],
                 )
             )
-            surr_ids.append(s.decode_ids[s.surr_offset : s.read_offset])
+            surr_ids.append(decode_ids[s.surr_offset : s.read_offset])
 
         # TODO(lmzheng): handle skip_special_tokens/spaces_between_special_tokens per request
         surr_texts = self.tokenizer.batch_decode(
@@ -204,7 +208,7 @@ class DetokenizerManager:
                 if len(new_text) > 0 and not new_text.endswith("�"):
                     s.decoded_text = s.decoded_text + new_text
                     s.surr_offset = s.read_offset
-                    s.read_offset = len(s.decode_ids)
+                    s.read_offset = decode_ids_lengths[i]
                     new_text = ""
                 else:
                     new_text = find_printable_text(new_text)
