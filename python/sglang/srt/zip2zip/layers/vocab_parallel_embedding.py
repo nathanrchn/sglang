@@ -30,7 +30,6 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
     def forward(
         self, input_: torch.Tensor, forward_batch: ForwardBatch
     ) -> torch.Tensor:
-        logger.info(f"Zip2ZipVocabParallelEmbedding input_.shape: {input_.shape}")
         return self.embed_tokens(input_, forward_batch)
 
     def extra_repr(self) -> str:

@@ -11,7 +11,7 @@ from zip2zip.constants import SAFETENSORS_ENCODERS_NAME
 from zip2zip.nn.encoders.config import EncoderConfigType
 from zip2zip_compression import CompressionConfig, CodebookManager
 
-
+from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.zip2zip.layers.logits_processor import Zip2ZipLogitsProcessor
 from sglang.srt.zip2zip.layers.vocab_parallel_embedding import (
     Zip2ZipVocabParallelEmbedding,
@@ -22,6 +22,7 @@ class Zip2ZipManager:
     def __init__(
         self,
         base_model: torch.nn.Module,
+        model_config: ModelConfig,
         zip2zip_path: str,
         dtype: torch.dtype,
         device: str,
@@ -29,9 +30,8 @@ class Zip2ZipManager:
         self.dtype = dtype
         self.device = device
         self.base_model = base_model
-        self.config: Zip2ZipConfig[EncoderConfigType] = Zip2ZipConfig.from_pretrained(
-            zip2zip_path
-        )
+        self.model_config = model_config
+        self.config: Zip2ZipConfig[EncoderConfigType] = model_config.zip2zip_config
 
         tokenizer = AutoTokenizer.from_pretrained(self.config.base_model_name_or_path)
         self.codebook_manager = CodebookManager(config=CompressionConfig(

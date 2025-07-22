@@ -241,6 +241,12 @@ class ForwardBatch:
     # For LoRA
     lora_paths: Optional[List[str]] = None
 
+    # For zip2zip
+    updates: Optional[torch.Tensor] = None
+    updates_indices: Optional[torch.Tensor] = None
+    hyper_embedding_weight: Optional[torch.Tensor] = None
+    hyper_linear_weight: Optional[torch.Tensor] = None
+
     # For input embeddings
     input_embeds: Optional[torch.tensor] = None
 
@@ -420,6 +426,9 @@ class ForwardBatch:
         # Init lora information
         if model_runner.server_args.enable_lora:
             model_runner.lora_manager.prepare_lora_batch(ret)
+
+        if model_runner.zip2zip_manager is not None:
+            ret.updates, ret.updates_indices = model_runner.update_compression_states(ret)
 
         TboForwardBatchPreparer.prepare(
             ret, is_draft_worker=model_runner.is_draft_worker

@@ -30,13 +30,15 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
         logits_metadata: Union[LogitsMetadata, ForwardBatch],
         aux_hidden_states: Optional[torch.Tensor] = None,
     ) -> LogitsProcessorOutput:
-        logger.info(f"Zip2ZipLogitsProcessor input_ids.shape: {input_ids.shape}")
         assert isinstance(
             logits_metadata, ForwardBatch
         ), "logits_metadata must be a ForwardBatch object"
 
         forward_batch = logits_metadata
         logits_metadata = LogitsMetadata.from_forward_batch(forward_batch)
+
+        logger.info(f"Zip2ZipLogitsProcessor input_ids.shape: {torch.unique(forward_batch.hyper_embedding_weight)}")
+        forward_batch.hyper_embedding_weight += 1
 
         assert (
             not logits_metadata.extend_return_logprob

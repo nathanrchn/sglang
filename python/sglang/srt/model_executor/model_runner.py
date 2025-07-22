@@ -120,7 +120,7 @@ from sglang.srt.utils import (
     set_cpu_offload_max_bytes,
     set_cuda_arch,
 )
-from sglang.srt.zip2zip.manager import Zip2ZipManager
+from python.sglang.srt.zip2zip.zip2zip_manager import Zip2ZipManager
 
 _is_hip = is_hip()
 _is_npu = is_npu()
@@ -885,10 +885,14 @@ class ModelRunner:
     def init_zip2zip(self):
         self.zip2zip_manager = Zip2ZipManager(
             base_model=self.model,
+            model_config=self.model_config,
             zip2zip_path=self.server_args.zip2zip_path,
             dtype=self.dtype,
             device=self.device,
         )
+
+    def update_compression_states(self, forward_batch: ForwardBatch) -> Tuple[torch.Tensor, torch.Tensor]:
+        return torch.empty(0), torch.empty(0)
 
     def init_lora_manager(self):
         self.lora_manager = LoRAManager(

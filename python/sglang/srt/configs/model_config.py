@@ -20,6 +20,7 @@ from enum import Enum, IntEnum, auto
 from typing import List, Optional, Set, Union
 
 import torch
+from zip2zip import Zip2ZipConfig
 from transformers import PretrainedConfig
 
 from sglang.srt.hf_transformers_utils import (
@@ -62,6 +63,7 @@ class ModelConfig:
         is_draft_model: bool = False,
         hybrid_kvcache_ratio: Optional[float] = None,
         model_impl: Union[str, ModelImpl] = ModelImpl.AUTO,
+        zip2zip_path: Optional[str] = None,
     ) -> None:
 
         self.model_path = model_path
@@ -273,6 +275,10 @@ class ModelConfig:
             config, "image_token_index", None
         )
 
+        # For zip2zip
+        if zip2zip_path is not None:
+            self.zip2zip_config = Zip2ZipConfig.from_pretrained(zip2zip_path)
+
     @staticmethod
     def from_server_args(server_args: ServerArgs, model_path: str = None, **kwargs):
         return ModelConfig(
@@ -287,6 +293,7 @@ class ModelConfig:
             quantization=server_args.quantization,
             hybrid_kvcache_ratio=server_args.hybrid_kvcache_ratio,
             model_impl=server_args.model_impl,
+            zip2zip_path=server_args.zip2zip_path,
             **kwargs,
         )
 
@@ -515,6 +522,12 @@ class ModelConfig:
                 client.pull_files(allow_pattern=["*config.json"])
                 self.model_weights = self.model_path
                 self.model_path = client.get_local_dir()
+
+    def get_pad_token_id(self):
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        return tokenizer.pad_token_id
 
 
 # adapted from https://github.com/vllm-project/vllm/blob/v0.6.4.post1/vllm/config.py

@@ -43,6 +43,7 @@ import numpy as np
 import torch
 import triton
 import triton.language as tl
+from zip2zip_compression import CompressionState
 
 from sglang.global_config import global_config
 from sglang.srt.configs.model_config import ModelConfig
@@ -886,6 +887,11 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     # hicache pointer for synchronizing data loading from CPU to GPU
     hicache_consumer_index: int = 0
 
+    # For zip2zip
+    compression_states: Optional[List[CompressionState]] = None
+    hyper_embedding_weight: Optional[torch.Tensor] = None
+    hyper_linear_weight: Optional[torch.Tensor] = None
+
     @classmethod
     def init_new(
         cls,
@@ -1028,6 +1034,35 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             return out_cache_loc, state
         else:
             return out_cache_loc
+        
+    # For zip2zip
+    def alloc_hyper_weights(self):
+        hyper_weight_shape = (
+            self.batch_size(),
+            self.model_config.zip2zip_config.compression.max_codebook_size,
+            self.model_config.hidden_size,
+        )   
+        self.hyper_embedding_weight = torch.zeros(
+            hyper_weight_shape,
+            dtype=self.model_config.dtype,
+            device=self.device,
+        )
+        self.hyper_linear_weight = torch.zeros(
+            hyper_weight_shape,
+            dtype=self.model_config.dtype,
+            device=self.device,
+        )
+
+    def alloc_compression_states(self):
+        pad_token_id = self.model_config.get_pad_token_id()
+
+        self.compression_states = [CompressionState(
+            initial_vocab_size=self.model_config.zip2zip_config.compression.initial_vocab_size,
+            max_codebook_size=self.model_config.zip2zip_config.compression.max_codebook_size,
+            max_subtokens=self.model_config.zip2zip_config.compression.max_subtokens,
+            pad_token_id=pad_token_id,
+            disabled_ids=self.model_config.zip2zip_config.compression.disabled_ids,
+        ) for _ in range(len(self.reqs))]
 
     def prepare_encoder_info_extend(self, input_ids: List[int], seq_lens: List[int]):
         self.encoder_lens_cpu = []
@@ -1571,6 +1606,10 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             (self.req_pool_indices, locs), self.out_cache_loc.to(torch.int32)
         )
 
+        if self.model_config.zip2zip_config is not None:
+            self.alloc_hyper_weights()
+            self.alloc_compression_states()
+
     def filter_batch(
         self,
         chunked_req_to_exclude: Optional[Union[Req, List[Req]]] = None,
@@ -1752,6 +1791,9 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             ),
             extend_input_logprob_token_ids=self.extend_input_logprob_token_ids,
             launch_done=self.launch_done,
+            compression_states=self.compression_states,
+            hyper_embedding_weight=self.hyper_embedding_weight,
+            hyper_linear_weight=self.hyper_linear_weight,
         )
 
     def copy(self):
@@ -1874,6 +1916,11 @@ class ModelWorkerBatch:
 
     # For LoRA
     lora_paths: Optional[List[str]]
+
+    # For zip2zip
+    compression_states: Optional[List[CompressionState]] = None
+    hyper_embedding_weight: Optional[torch.Tensor] = None
+    hyper_linear_weight: Optional[torch.Tensor] = None
 
     # Sampling info
     sampling_info: SamplingBatchInfo
