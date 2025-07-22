@@ -84,7 +84,7 @@ class Zip2ZipManager:
                     f"Can't find '{SAFETENSORS_ENCODERS_NAME}' at '{zip2zip_path}'"
                 ) from exc
 
-        encoders_state_dict = load_file(encoder_file, device=self.device.split(":")[1])
+        encoders_state_dict = load_file(encoder_file, device=self.device)
 
         input_encoder_state_dict = {}
         output_encoder_state_dict = {}
