@@ -1197,6 +1197,14 @@ class ServerArgs:
             help="Choose the kernel backend for multi-LoRA serving.",
         )
 
+        # Zip2Zip
+        parser.add_argument(
+            "--zip2zip-path",
+            type=str,
+            default=ServerArgs.zip2zip_path,
+            help="The path of the zip2zip model.",
+        )
+
         # Kernel backend
         parser.add_argument(
             "--attention-backend",
