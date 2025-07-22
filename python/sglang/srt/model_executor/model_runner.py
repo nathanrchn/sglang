@@ -882,7 +882,11 @@ class ModelRunner:
             return None
         
     def init_zip2zip(self):
-        pass
+        old_forward = self.model.forward
+        def fake_forward(*args, **kwargs):
+            print("forward")
+            return old_forward
+        self.model.forward = fake_forward
 
     def init_lora_manager(self):
         self.lora_manager = LoRAManager(

@@ -15,10 +15,13 @@ def get_zip2zip_tokenizer(
 
     tokenizer = Zip2ZipTokenizer(config, tokenizer)
     del config
-    
+
     return tokenizer
 
-def get_lzw_compressor(zip2zip_path: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast]) -> LZWCompressor:
+
+def get_lzw_compressor(
+    zip2zip_path: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
+) -> LZWCompressor:
     config = Zip2ZipConfig.from_pretrained(zip2zip_path)
     compression_config = config.compression
 

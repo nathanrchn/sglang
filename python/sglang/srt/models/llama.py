@@ -315,7 +315,7 @@ class LlamaModel(nn.Module):
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]], PPProxyTensors]:
         if self.pp_group.is_first_rank:
             if input_embeds is None:
-                hidden_states = self.embed_tokens(input_ids)
+                hidden_states = self.embed_tokens(input_ids, forward_batch)
             else:
                 hidden_states = input_embeds
             residual = None

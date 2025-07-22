@@ -245,7 +245,7 @@ class QWenModel(nn.Module):
         positions: torch.Tensor,
         forward_batch: ForwardBatch,
     ) -> torch.Tensor:
-        hidden_states = self.wte(input_ids)
+        hidden_states = self.wte(input_ids, forward_batch)
         for i in range(len(self.h)):
             layer = self.h[i]
             hidden_states = layer(
