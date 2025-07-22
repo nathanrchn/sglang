@@ -1,5 +1,5 @@
 import os
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional
 
 import torch
 from zip2zip import Zip2ZipConfig
@@ -12,6 +12,7 @@ from zip2zip.nn.encoders.config import EncoderConfigType
 from zip2zip_compression import CompressionConfig, CodebookManager
 
 from sglang.srt.configs.model_config import ModelConfig
+from sglang.srt.managers.schedule_batch import ModelWorkerBatch
 from sglang.srt.zip2zip.layers.logits_processor import Zip2ZipLogitsProcessor
 from sglang.srt.zip2zip.layers.vocab_parallel_embedding import (
     Zip2ZipVocabParallelEmbedding,
@@ -57,6 +58,9 @@ class Zip2ZipManager:
         self.base_model.logits_processor = Zip2ZipLogitsProcessor(
             self.base_model.logits_processor, output_encoder
         )
+
+    def update_compression_states(self, batch: ModelWorkerBatch) -> Tuple[List[List[int]], List[List[int]]]:
+        return self.codebook_manager.update_codebooks(batch.input_ids.tolist(), batch.compression_states, True)
 
     def get_pretrained_encoders(
         self, zip2zip_path: str

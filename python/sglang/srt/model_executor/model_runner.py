@@ -69,6 +69,7 @@ from sglang.srt.layers.torchao_utils import apply_torchao_config_to_model
 from sglang.srt.layers.utils import is_sm100_supported
 from sglang.srt.lora.lora_manager import LoRAManager
 from sglang.srt.managers.schedule_batch import (
+    ModelWorkerBatch,
     GLOBAL_SERVER_ARGS_KEYS,
     global_server_args_dict,
 )
@@ -120,7 +121,7 @@ from sglang.srt.utils import (
     set_cpu_offload_max_bytes,
     set_cuda_arch,
 )
-from python.sglang.srt.zip2zip.zip2zip_manager import Zip2ZipManager
+from sglang.srt.zip2zip.zip2zip_manager import Zip2ZipManager
 
 _is_hip = is_hip()
 _is_npu = is_npu()
@@ -891,8 +892,9 @@ class ModelRunner:
             device=self.device,
         )
 
-    def update_compression_states(self, forward_batch: ForwardBatch) -> Tuple[torch.Tensor, torch.Tensor]:
-        return torch.empty(0), torch.empty(0)
+    def update_compression_states(self, batch: ModelWorkerBatch) -> Tuple[torch.Tensor, torch.Tensor]:
+        updates, updates_indices = self.zip2zip_manager.update_compression_states(batch)
+        return updates, updates_indices
 
     def init_lora_manager(self):
         self.lora_manager = LoRAManager(
