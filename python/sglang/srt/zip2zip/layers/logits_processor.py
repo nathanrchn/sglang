@@ -2,6 +2,7 @@ import logging
 from typing import Optional, Union
 
 import torch
+from zip2zip.nn.encoders.base import BaseEncoder
 
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
@@ -15,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class Zip2ZipLogitsProcessor(torch.nn.Module):
-    def __init__(self, logits_processor: LogitsProcessor) -> None:
+    def __init__(self, logits_processor: LogitsProcessor, output_encoder: BaseEncoder) -> None:
         super().__init__()
 
+        self.output_encoder = output_encoder
         self.logits_processor = logits_processor
 
     def forward(

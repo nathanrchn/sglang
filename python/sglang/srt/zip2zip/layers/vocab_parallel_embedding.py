@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
     def __init__(
-        self, embed_tokens: VocabParallelEmbedding, encoder: BaseEncoder
+        self, embed_tokens: VocabParallelEmbedding, input_encoder: BaseEncoder
     ) -> None:
         super().__init__()
         assert embed_tokens.quant_config is None, "zip2zip doesn't support quantization"
 
-        self.encoder = encoder
+        self.input_encoder = input_encoder
         self.embed_tokens = embed_tokens
 
     def get_sharded_to_full_mapping(self) -> Optional[List[int]]:

@@ -98,3 +98,5 @@ class Zip2ZipManager:
         input_encoder.load_state_dict(input_encoder_state_dict)
         if output_encoder is not None:
             output_encoder.load_state_dict(output_encoder_state_dict)
+
+        return input_encoder, output_encoder
