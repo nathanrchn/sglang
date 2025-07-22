@@ -39,8 +39,8 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
         logits_metadata = LogitsMetadata.from_forward_batch(forward_batch)
 
         assert (
-            not logits_metadata.return_logprob
-        ), "zip2zip implementation doesn't yet support return_logprob"
+            not logits_metadata.extend_return_logprob
+        ), "zip2zip implementation doesn't yet support extend_return_logprob"
 
         output: LogitsProcessorOutput = self.logits_processor(
             input_ids,
