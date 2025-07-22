@@ -24,10 +24,11 @@ class Zip2ZipManager:
         base_model: torch.nn.Module,
         zip2zip_path: str,
         dtype: torch.dtype,
+        device: str,
     ) -> None:
         self.dtype = dtype
+        self.device = device
         self.base_model = base_model
-        self.device = next(self.base_model.parameters()).device
         self.config: Zip2ZipConfig[EncoderConfigType] = Zip2ZipConfig.from_pretrained(
             zip2zip_path
         )
@@ -40,7 +41,7 @@ class Zip2ZipManager:
             pad_token_id=tokenizer.pad_token_id,
             disabled_ids=self.config.compression.disabled_ids,
         ))
-        
+
         input_encoder, output_encoder = self.get_pretrained_encoders(zip2zip_path)
 
         assert hasattr(
@@ -83,7 +84,7 @@ class Zip2ZipManager:
                     f"Can't find '{SAFETENSORS_ENCODERS_NAME}' at '{zip2zip_path}'"
                 ) from exc
 
-        encoders_state_dict = load_file(encoder_file, device=self.device)
+        encoders_state_dict = load_file(encoder_file, device=self.device.split(":")[1])
 
         input_encoder_state_dict = {}
         output_encoder_state_dict = {}

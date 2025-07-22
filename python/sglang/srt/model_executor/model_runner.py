@@ -887,6 +887,7 @@ class ModelRunner:
             base_model=self.model,
             zip2zip_path=self.server_args.zip2zip_path,
             dtype=self.dtype,
+            device=self.device,
         )
 
     def init_lora_manager(self):
