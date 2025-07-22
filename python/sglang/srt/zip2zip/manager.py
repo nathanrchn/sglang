@@ -3,12 +3,13 @@ from typing import Tuple, Optional
 
 import torch
 from zip2zip import Zip2ZipConfig
+from transformers import AutoTokenizer
 from safetensors.torch import load_file
 from huggingface_hub import hf_hub_download
-from zip2zip_compression import CodebookManager
 from zip2zip.nn.encoders.base import BaseEncoder
 from zip2zip.constants import SAFETENSORS_ENCODERS_NAME
 from zip2zip.nn.encoders.config import EncoderConfigType
+from zip2zip_compression import CompressionConfig, CodebookManager
 
 
 from sglang.srt.zip2zip.layers.logits_processor import Zip2ZipLogitsProcessor
@@ -31,7 +32,15 @@ class Zip2ZipManager:
             zip2zip_path
         )
 
-        self.codebook_manager = CodebookManager(self.config.compression)
+        tokenizer = AutoTokenizer.from_pretrained(self.config.base_model_name_or_path)
+        self.codebook_manager = CodebookManager(config=CompressionConfig(
+            initial_vocab_size=self.config.compression.initial_vocab_size,
+            max_codebook_size=self.config.compression.max_codebook_size,
+            max_subtokens=self.config.compression.max_subtokens,
+            pad_token_id=tokenizer.pad_token_id,
+            disabled_ids=self.config.compression.disabled_ids,
+        ))
+        
         input_encoder, output_encoder = self.get_pretrained_encoders(zip2zip_path)
 
         assert hasattr(
