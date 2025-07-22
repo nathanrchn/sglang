@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Union
 
 import torch
@@ -9,6 +10,8 @@ from sglang.srt.layers.logits_processor import (
     LogitsMetadata,
     ForwardBatch,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Zip2ZipLogitsProcessor(torch.nn.Module):
@@ -25,6 +28,7 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
         logits_metadata: Union[LogitsMetadata, ForwardBatch],
         aux_hidden_states: Optional[torch.Tensor] = None,
     ) -> LogitsProcessorOutput:
+        logger.info(f"Zip2ZipLogitsProcessor input_ids.shape: {input_ids.shape}")
         assert isinstance(
             logits_metadata, ForwardBatch
         ), "logits_metadata must be a ForwardBatch object"

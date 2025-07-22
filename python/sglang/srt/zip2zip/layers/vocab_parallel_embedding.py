@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, List
 
 import torch
@@ -6,6 +7,8 @@ from zip2zip.nn.encoders.base import BaseEncoder
 
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
+
+logger = logging.getLogger(__name__)
 
 
 class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
@@ -27,6 +30,7 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
     def forward(
         self, input_: torch.Tensor, forward_batch: ForwardBatch
     ) -> torch.Tensor:
+        logger.info(f"Zip2ZipVocabParallelEmbedding input_.shape: {input_.shape}")
         return self.embed_tokens(input_)
 
     def extra_repr(self) -> str:
