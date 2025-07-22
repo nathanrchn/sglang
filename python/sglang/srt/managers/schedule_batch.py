@@ -43,7 +43,7 @@ import numpy as np
 import torch
 import triton
 import triton.language as tl
-from zip2zip_compression import CompressionState
+from zip2zip_compression import CompressionConfig, CompressionState
 
 from sglang.global_config import global_config
 from sglang.srt.configs.model_config import ModelConfig
@@ -1056,13 +1056,15 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     def alloc_compression_states(self):
         pad_token_id = self.model_config.get_pad_token_id()
 
-        self.compression_states = [CompressionState(
+        config = CompressionConfig(
             initial_vocab_size=self.model_config.zip2zip_config.compression.initial_vocab_size,
             max_codebook_size=self.model_config.zip2zip_config.compression.max_codebook_size,
             max_subtokens=self.model_config.zip2zip_config.compression.max_subtokens,
             pad_token_id=pad_token_id,
             disabled_ids=self.model_config.zip2zip_config.compression.disabled_ids,
-        ) for _ in range(len(self.reqs))]
+        )
+
+        self.compression_states = [CompressionState(config=config) for _ in range(len(self.reqs))]
 
     def prepare_encoder_info_extend(self, input_ids: List[int], seq_lens: List[int]):
         self.encoder_lens_cpu = []
@@ -1918,9 +1920,9 @@ class ModelWorkerBatch:
     lora_paths: Optional[List[str]]
 
     # For zip2zip
-    compression_states: Optional[List[CompressionState]] = None
-    hyper_embedding_weight: Optional[torch.Tensor] = None
-    hyper_linear_weight: Optional[torch.Tensor] = None
+    compression_states: Optional[List[CompressionState]]
+    hyper_embedding_weight: Optional[torch.Tensor]
+    hyper_linear_weight: Optional[torch.Tensor]
 
     # Sampling info
     sampling_info: SamplingBatchInfo

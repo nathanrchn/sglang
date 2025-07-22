@@ -429,6 +429,8 @@ class ForwardBatch:
 
         if model_runner.zip2zip_manager is not None:
             ret.updates, ret.updates_indices = model_runner.update_compression_states(ret)
+            ret.hyper_embedding_weight = batch.hyper_embedding_weight
+            ret.hyper_linear_weight = batch.hyper_linear_weight
 
         TboForwardBatchPreparer.prepare(
             ret, is_draft_worker=model_runner.is_draft_worker
