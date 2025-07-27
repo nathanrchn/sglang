@@ -35,13 +35,15 @@ class Zip2ZipManager:
         self.config: Zip2ZipConfig[EncoderConfigType] = model_config.zip2zip_config
 
         tokenizer = AutoTokenizer.from_pretrained(self.config.base_model_name_or_path)
-        self.codebook_manager = CodebookManager(config=CompressionConfig(
-            initial_vocab_size=self.config.compression.initial_vocab_size,
-            max_codebook_size=self.config.compression.max_codebook_size,
-            max_subtokens=self.config.compression.max_subtokens,
-            pad_token_id=tokenizer.pad_token_id,
-            disabled_ids=self.config.compression.disabled_ids,
-        ))
+        self.codebook_manager = CodebookManager(
+            config=CompressionConfig(
+                initial_vocab_size=self.config.compression.initial_vocab_size,
+                max_codebook_size=self.config.compression.max_codebook_size,
+                max_subtokens=self.config.compression.max_subtokens,
+                pad_token_id=tokenizer.pad_token_id,
+                disabled_ids=self.config.compression.disabled_ids,
+            )
+        )
 
         input_encoder, output_encoder = self.get_pretrained_encoders(zip2zip_path)
 
@@ -55,12 +57,23 @@ class Zip2ZipManager:
         self.base_model.model.embed_tokens = Zip2ZipVocabParallelEmbedding(
             self.base_model.model.embed_tokens, input_encoder
         )
+
+        lp = self.base_model.logits_processor
         self.base_model.logits_processor = Zip2ZipLogitsProcessor(
-            self.base_model.logits_processor, output_encoder
+            config=lp.config,
+            zip2zip_config=self.config,
+            output_encoder=output_encoder,
+            pad_token_id=tokenizer.pad_token_id,
+            skip_all_gather=False,
+            logit_scale=lp.logit_scale,
         )
 
-    def update_compression_states(self, batch: ModelWorkerBatch) -> Tuple[List[List[int]], List[List[int]]]:
-        return self.codebook_manager.update_codebooks(batch.input_ids.tolist(), batch.compression_states, True)
+    def update_compression_states(
+        self, batch: ModelWorkerBatch
+    ) -> Tuple[List[List[int]], List[List[int]]]:
+        return self.codebook_manager.update_codebooks(
+            batch.input_ids.tolist(), batch.compression_states, True
+        )
 
     def get_pretrained_encoders(
         self, zip2zip_path: str
