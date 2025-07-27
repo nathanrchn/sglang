@@ -55,7 +55,9 @@ class Zip2ZipManager:
         ), "the model needs to have a logits_processor attribute to use zip2zip"
 
         self.base_model.model.embed_tokens = Zip2ZipVocabParallelEmbedding(
-            self.base_model.model.embed_tokens, input_encoder
+            embed_tokens=self.base_model.model.embed_tokens,
+            input_encoder=input_encoder,
+            pad_token_id=tokenizer.pad_token_id,
         )
 
         lp = self.base_model.logits_processor

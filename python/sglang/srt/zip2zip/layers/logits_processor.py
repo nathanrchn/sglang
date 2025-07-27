@@ -317,9 +317,13 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
         ivs = self.zip2zip_config.compression.initial_vocab_size
         mcs = self.zip2zip_config.compression.max_codebook_size
 
-        forward_batch.hyper_linear_weight = self.output_encoder(
+        indices_mask = forward_batch.updates_indices != -1
+
+        forward_batch.hyper_linear_weight[
+            forward_batch.updates_indices * indices_mask
+        ] = self.output_encoder(
             forward_batch.updates, lm_head.weight, self.pad_token_id
-        )
+        ) * indices_mask.unsqueeze(-1)
 
         if hasattr(lm_head, "weight"):
             if use_intel_amx_backend(lm_head):
