@@ -283,6 +283,8 @@ class ModelConfig:
             self.vocab_size += max_codebook_size
             self.hf_text_config.vocab_size += max_codebook_size
 
+            self.pad_token_id = self.get_pad_token_id()
+
     @staticmethod
     def from_server_args(server_args: ServerArgs, model_path: str = None, **kwargs):
         return ModelConfig(

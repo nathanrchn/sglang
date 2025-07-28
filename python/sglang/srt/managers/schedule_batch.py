@@ -914,6 +914,36 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             ), "SWARadixCache or SWAChunkCache is required for SWATokenToKVPoolAllocator"
             is_hybrid = True
 
+        compression_states = None
+        hyper_embedding_weight = None
+        hyper_linear_weight = None
+        if model_config.zip2zip_config is not None:
+            hyper_weight_shape = (
+                len(reqs),
+                model_config.zip2zip_config.compression.max_codebook_size,
+                model_config.hidden_size,
+            )   
+            hyper_embedding_weight = torch.zeros(
+                hyper_weight_shape,
+                dtype=model_config.dtype,
+                device=req_to_token_pool.device,
+            )
+            hyper_linear_weight = torch.zeros(
+                hyper_weight_shape,
+                dtype=model_config.dtype,
+                device=req_to_token_pool.device,
+            )
+
+            config = CompressionConfig(
+                initial_vocab_size=model_config.zip2zip_config.compression.initial_vocab_size,
+                max_codebook_size=model_config.zip2zip_config.compression.max_codebook_size,
+                max_subtokens=model_config.zip2zip_config.compression.max_subtokens,
+                pad_token_id=model_config.pad_token_id,
+                disabled_ids=model_config.zip2zip_config.compression.disabled_ids,
+            )
+
+            compression_states = [CompressionState(config=config) for _ in range(len(reqs))]
+
         return cls(
             reqs=reqs,
             req_to_token_pool=req_to_token_pool,
@@ -930,6 +960,9 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             enable_custom_logit_processor=enable_custom_logit_processor,
             return_hidden_states=any(req.return_hidden_states for req in reqs),
             chunked_req=chunked_req,
+            compression_states=compression_states,
+            hyper_embedding_weight=hyper_embedding_weight,
+            hyper_linear_weight=hyper_linear_weight,
         )
 
     def batch_size(self):
@@ -1034,37 +1067,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             return out_cache_loc, state
         else:
             return out_cache_loc
-        
-    # For zip2zip
-    def alloc_hyper_weights(self):
-        hyper_weight_shape = (
-            self.batch_size(),
-            self.model_config.zip2zip_config.compression.max_codebook_size,
-            self.model_config.hidden_size,
-        )   
-        self.hyper_embedding_weight = torch.zeros(
-            hyper_weight_shape,
-            dtype=self.model_config.dtype,
-            device=self.device,
-        )
-        self.hyper_linear_weight = torch.zeros(
-            hyper_weight_shape,
-            dtype=self.model_config.dtype,
-            device=self.device,
-        )
-
-    def alloc_compression_states(self):
-        pad_token_id = self.model_config.get_pad_token_id()
-
-        config = CompressionConfig(
-            initial_vocab_size=self.model_config.zip2zip_config.compression.initial_vocab_size,
-            max_codebook_size=self.model_config.zip2zip_config.compression.max_codebook_size,
-            max_subtokens=self.model_config.zip2zip_config.compression.max_subtokens,
-            pad_token_id=pad_token_id,
-            disabled_ids=self.model_config.zip2zip_config.compression.disabled_ids,
-        )
-
-        self.compression_states = [CompressionState(config=config) for _ in range(len(self.reqs))]
 
     def prepare_encoder_info_extend(self, input_ids: List[int], seq_lens: List[int]):
         self.encoder_lens_cpu = []
@@ -1607,10 +1609,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         self.req_to_token_pool.write(
             (self.req_pool_indices, locs), self.out_cache_loc.to(torch.int32)
         )
-
-        if self.model_config.zip2zip_config is not None:
-            self.alloc_hyper_weights()
-            self.alloc_compression_states()
 
     def filter_batch(
         self,
