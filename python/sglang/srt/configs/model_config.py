@@ -276,13 +276,9 @@ class ModelConfig:
         )
 
         # For zip2zip
+        self.zip2zip_config = None
         if zip2zip_path is not None:
             self.zip2zip_config = Zip2ZipConfig.from_pretrained(zip2zip_path)
-            max_codebook_size = self.zip2zip_config.compression.max_codebook_size
-            
-            self.vocab_size += max_codebook_size
-            self.hf_text_config.vocab_size += max_codebook_size
-
             self.pad_token_id = self.get_pad_token_id()
 
     @staticmethod

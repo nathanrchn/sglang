@@ -922,7 +922,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 len(reqs),
                 model_config.zip2zip_config.compression.max_codebook_size,
                 model_config.hidden_size,
-            )   
+            )
             hyper_embedding_weight = torch.zeros(
                 hyper_weight_shape,
                 dtype=model_config.dtype,

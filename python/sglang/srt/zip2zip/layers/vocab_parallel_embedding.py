@@ -43,11 +43,16 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
 
         indices_mask = forward_batch.updates_indices != -1
 
-        forward_batch.hyper_embedding_weight[
-            forward_batch.updates_indices * indices_mask
-        ] = self.input_encoder(
+        updates = self.input_encoder(
             forward_batch.updates, self.embed_tokens.weight, self.pad_token_id
         ) * indices_mask.unsqueeze(-1)
+
+        for i in range(input_.size(0)):
+            forward_batch.hyper_embedding_weight.index_add_(
+                0,
+                forward_batch.updates_indices[i] * indices_mask[i],
+                updates[i]
+            )
 
         batch_offsets = torch.arange(
             input_.size(0), device=input_.device, dtype=torch.long

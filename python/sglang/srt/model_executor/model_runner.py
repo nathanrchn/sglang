@@ -894,7 +894,7 @@ class ModelRunner:
 
     def update_compression_states(self, batch: ModelWorkerBatch) -> Tuple[torch.Tensor, torch.Tensor]:
         updates, updates_indices = self.zip2zip_manager.update_compression_states(batch)
-        return updates, updates_indices
+        return torch.tensor(updates, device=self.device).view(batch.bs, -1, self.model_config.zip2zip_config.compression.max_subtokens), torch.tensor(updates_indices, device=self.device)
 
     def init_lora_manager(self):
         self.lora_manager = LoRAManager(

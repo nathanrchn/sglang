@@ -306,24 +306,29 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
             )
             dp_gather_replicate(hidden_states, local_hidden_states, logits_metadata)
 
+        ivs = self.zip2zip_config.compression.initial_vocab_size
+        mcs = self.zip2zip_config.compression.max_codebook_size
+
         logits = torch.empty(
             forward_batch.batch_size,
-            self.config.vocab_size,
+            self.config.vocab_size + mcs,
             hidden_states.shape[-1],
             device=hidden_states.device,
             dtype=hidden_states.dtype,
         )
 
-        ivs = self.zip2zip_config.compression.initial_vocab_size
-        mcs = self.zip2zip_config.compression.max_codebook_size
-
         indices_mask = forward_batch.updates_indices != -1
 
-        forward_batch.hyper_linear_weight[
-            forward_batch.updates_indices * indices_mask
-        ] = self.output_encoder(
+        updates = self.output_encoder(
             forward_batch.updates, lm_head.weight, self.pad_token_id
         ) * indices_mask.unsqueeze(-1)
+
+        for i in range(forward_batch.batch_size):
+            forward_batch.hyper_linear_weight.index_add_(
+                0,
+                forward_batch.updates_indices[i] * indices_mask[i],
+                updates[i]
+            )
 
         if hasattr(lm_head, "weight"):
             if use_intel_amx_backend(lm_head):
@@ -354,7 +359,7 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
         if self.do_tensor_parallel_all_gather:
             if self.use_attn_tp_group:
                 global_logits = torch.empty(
-                    (self.config.vocab_size, logits.shape[0]),
+                    (self.config.vocab_size + mcs, logits.shape[0]),
                     device=logits.device,
                     dtype=logits.dtype,
                 )
@@ -377,7 +382,7 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
             )
             dp_scatter(logits, global_logits, logits_metadata)
 
-        logits = logits[:, : self.config.vocab_size].float()
+        logits = logits[:, : self.config.vocab_size + mcs].float()
 
         if self.final_logit_softcapping:
             fused_softcap(logits, self.final_logit_softcapping)

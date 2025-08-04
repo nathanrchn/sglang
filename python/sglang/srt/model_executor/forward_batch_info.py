@@ -427,7 +427,7 @@ class ForwardBatch:
         if model_runner.server_args.enable_lora:
             model_runner.lora_manager.prepare_lora_batch(ret)
 
-        if model_runner.zip2zip_manager is not None:
+        if model_runner.server_args.zip2zip_path is not None:
             ret.updates, ret.updates_indices = model_runner.update_compression_states(batch)
             ret.hyper_embedding_weight = batch.hyper_embedding_weight
             ret.hyper_linear_weight = batch.hyper_linear_weight
