@@ -9,10 +9,9 @@ from huggingface_hub import hf_hub_download
 from zip2zip.nn.encoders.base import BaseEncoder
 from zip2zip.constants import SAFETENSORS_ENCODERS_NAME
 from zip2zip.nn.encoders.config import EncoderConfigType
-from zip2zip_compression import CompressionConfig, CodebookManager
+from zip2zip_compression import CompressionConfig, CompressionState, CodebookManager
 
 from sglang.srt.configs.model_config import ModelConfig
-from sglang.srt.managers.schedule_batch import ModelWorkerBatch
 from sglang.srt.zip2zip.layers.logits_processor import Zip2ZipLogitsProcessor
 from sglang.srt.zip2zip.layers.vocab_parallel_embedding import (
     Zip2ZipVocabParallelEmbedding,
@@ -70,12 +69,11 @@ class Zip2ZipManager:
             logit_scale=lp.logit_scale,
         )
 
-    def update_compression_states(
-        self, batch: ModelWorkerBatch
-    ) -> Tuple[List[List[int]], List[List[int]]]:
-        return self.codebook_manager.update_codebooks(
-            batch.input_ids.tolist(), batch.compression_states, True
-        )
+    def update_compression_state(self, state: CompressionState, ids: List[int]) -> None:
+        self.codebook_manager.update_codebooks(ids, [state])
+    
+    def update_compression_states_with_next_token_ids(self, states: List[CompressionState], next_token_ids: List[int]) -> None:
+        self.codebook_manager.update_codebooks(next_token_ids, states)
 
     def get_pretrained_encoders(
         self, zip2zip_path: str

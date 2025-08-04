@@ -164,6 +164,12 @@ class SchedulerOutputProcessorMixin:
                             )
                             logprob_pt += num_input_logprobs
 
+            if self.model_config.zip2zip_config is not None:
+                self.tp_worker.model_runner.zip2zip_manager.update_compression_states_with_next_token_ids(
+                    [req.compression_state for req in batch.reqs],
+                    next_token_ids[:, None].tolist(), # [b] -> [b, 1]
+                )
+
             self.set_next_batch_sampling_info_done(batch)
 
         else:  # embedding or reward model
@@ -283,6 +289,12 @@ class SchedulerOutputProcessorMixin:
                     )
                     self.abort_request(AbortReq(req.rid))
                 req.grammar.finished = req.finished()
+
+        if self.model_config.zip2zip_config is not None:
+            self.tp_worker.model_runner.zip2zip_manager.update_compression_states_with_next_token_ids(
+                [req.compression_state for req in batch.reqs],
+                next_token_ids[:, None].tolist(), # [b] -> [b, 1]
+            )
 
         self.set_next_batch_sampling_info_done(batch)
         self.stream_output(batch.reqs, batch.return_logprob)

@@ -43,7 +43,7 @@ import numpy as np
 import torch
 import triton
 import triton.language as tl
-from zip2zip_compression import CompressionConfig, CompressionState
+from zip2zip_compression import CompressionState
 
 from sglang.global_config import global_config
 from sglang.srt.configs.model_config import ModelConfig
@@ -611,6 +611,9 @@ class Req:
         self.tmp_end_idx: int = -1
         self.metadata_buffer_index: int = -1
 
+        # For zip2zip
+        self.compression_state: Optional[CompressionState] = None
+
     @property
     def seqlen(self):
         return len(self.origin_input_ids) + len(self.output_ids)
@@ -888,7 +891,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     hicache_consumer_index: int = 0
 
     # For zip2zip
-    compression_states: Optional[List[CompressionState]] = None
     hyper_embedding_weight: Optional[torch.Tensor] = None
     hyper_linear_weight: Optional[torch.Tensor] = None
 
@@ -914,7 +916,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             ), "SWARadixCache or SWAChunkCache is required for SWATokenToKVPoolAllocator"
             is_hybrid = True
 
-        compression_states = None
         hyper_embedding_weight = None
         hyper_linear_weight = None
         if model_config.zip2zip_config is not None:
@@ -934,16 +935,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 device=req_to_token_pool.device,
             )
 
-            config = CompressionConfig(
-                initial_vocab_size=model_config.zip2zip_config.compression.initial_vocab_size,
-                max_codebook_size=model_config.zip2zip_config.compression.max_codebook_size,
-                max_subtokens=model_config.zip2zip_config.compression.max_subtokens,
-                pad_token_id=model_config.pad_token_id,
-                disabled_ids=model_config.zip2zip_config.compression.disabled_ids,
-            )
-
-            compression_states = [CompressionState(config=config) for _ in range(len(reqs))]
-
         return cls(
             reqs=reqs,
             req_to_token_pool=req_to_token_pool,
@@ -960,7 +951,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             enable_custom_logit_processor=enable_custom_logit_processor,
             return_hidden_states=any(req.return_hidden_states for req in reqs),
             chunked_req=chunked_req,
-            compression_states=compression_states,
             hyper_embedding_weight=hyper_embedding_weight,
             hyper_linear_weight=hyper_linear_weight,
         )
@@ -1791,7 +1781,6 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             ),
             extend_input_logprob_token_ids=self.extend_input_logprob_token_ids,
             launch_done=self.launch_done,
-            compression_states=self.compression_states,
             hyper_embedding_weight=self.hyper_embedding_weight,
             hyper_linear_weight=self.hyper_linear_weight,
         )
@@ -1918,7 +1907,8 @@ class ModelWorkerBatch:
     lora_paths: Optional[List[str]]
 
     # For zip2zip
-    compression_states: Optional[List[CompressionState]]
+    updates_list: Optional[List[List[int]]]
+    updates_indices_list: Optional[List[List[int]]]
     hyper_embedding_weight: Optional[torch.Tensor]
     hyper_linear_weight: Optional[torch.Tensor]
 

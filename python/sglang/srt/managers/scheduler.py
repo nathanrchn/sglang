@@ -33,6 +33,7 @@ import setproctitle
 import torch
 import zmq
 from torch.distributed import barrier
+from zip2zip_compression import CompressionState
 
 from sglang.global_config import global_config
 from sglang.srt.configs.model_config import ModelConfig
@@ -1246,6 +1247,15 @@ class Scheduler(
                 if value is INVALID_GRAMMAR_OBJ:  # We hit a cached invalid grammar.
                     error_msg = f"Invalid grammar request with cache hit: {key=}"
                     req.set_finish_with_abort(error_msg)
+
+        if self.model_config.zip2zip_config is not None:
+            req.compression_state = CompressionState(self.model_config.zip2zip_config)
+
+            # Initial update with the compression of the input_ids
+            self.tp_worker.model_runner.zip2zip_manager.update_compression_state(
+                req.compression_state,
+                req.origin_input_ids,
+            )
 
         if add_to_grammar_queue:
             req.queue_time_start = time.perf_counter()

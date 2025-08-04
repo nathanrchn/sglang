@@ -547,7 +547,6 @@ class CudaGraphRunner:
             self.model_runner.lora_manager.prepare_lora_batch(forward_batch)
 
         if self.model_runner.server_args.zip2zip_path is not None:
-            from zip2zip_compression import CompressionConfig, CompressionState
             model_config = self.model_runner.model_config
 
             hyper_weight_shape = (
@@ -566,20 +565,22 @@ class CudaGraphRunner:
                 device=self.model_runner.device,
             )
 
-            config = CompressionConfig(
-                initial_vocab_size=model_config.zip2zip_config.compression.initial_vocab_size,
-                max_codebook_size=model_config.zip2zip_config.compression.max_codebook_size,
-                max_subtokens=model_config.zip2zip_config.compression.max_subtokens,
-                pad_token_id=model_config.pad_token_id,
-                disabled_ids=model_config.zip2zip_config.compression.disabled_ids,
+            updates = torch.zeros(
+                bs,
+                model_config.zip2zip_config.compression.max_codebook_size,
+                model_config.zip2zip_config.compression.max_subtokens,
+                dtype=torch.int32,
+                device=self.model_runner.device,
+            )
+            updates_indices = torch.zeros(
+                bs,
+                model_config.zip2zip_config.compression.max_codebook_size,
+                dtype=torch.int32,
+                device=self.model_runner.device,
             )
 
-            compression_states = [CompressionState(config=config) for _ in range(bs)]
-            updates, updates_indices = self.model_runner.zip2zip_manager.codebook_manager.update_codebooks(
-                input_ids[:, None].tolist(), compression_states, True
-            )
-            forward_batch.updates = torch.tensor(updates, device=self.model_runner.device).view(bs, -1, model_config.zip2zip_config.compression.max_subtokens)
-            forward_batch.updates_indices = torch.tensor(updates_indices, device=self.model_runner.device)
+            forward_batch.updates = updates
+            forward_batch.updates_indices = updates_indices
             forward_batch.hyper_embedding_weight = hyper_embedding_weight
             forward_batch.hyper_linear_weight = hyper_linear_weight
 
