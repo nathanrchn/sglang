@@ -377,13 +377,13 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
                         
                         # Create combined updates (zeros for embedding + linear part)
                         hidden_size = forward_batch.hyper_weight_pool.hidden_size
-                        vocab_size = flat_linear_updates.shape[-1]
 
                         combined_updates = torch.zeros(
-                            (flat_linear_updates.shape[0], hidden_size + vocab_size),
+                            (flat_linear_updates.shape[0], 2 * hidden_size),
                             device=forward_batch.updates.device,
                             dtype=flat_linear_updates.dtype,
                         )
+                        # Embedding part (first half) remains zeros for logits processor
                         combined_updates[:, hidden_size:] = flat_linear_updates
 
                         # Update the pool using the efficient Triton kernel

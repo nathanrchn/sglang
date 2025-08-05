@@ -146,11 +146,12 @@ class HyperWeightPool:
                 device=self.device,
             )
 
-            # Hyper linear weights: [size, max_codebook_size, vocab_size]
+            # Hyper linear weights: [size, max_codebook_size, hidden_size]
+            # This maps from hidden_size -> max_codebook_size (hyper vocab logits)
             self.linear_buffer = torch.zeros(
                 self.size,
                 self.max_codebook_size,
-                self.vocab_size,
+                self.hidden_size,  # Use hidden_size for input dimension
                 dtype=self.dtype,
                 device=self.device,
             )
@@ -172,7 +173,7 @@ class HyperWeightPool:
     def get_linear_size_bytes(self) -> int:
         """Get linear buffer size in bytes."""
         return (
-            self.size * self.max_codebook_size * self.vocab_size * self.dtype.itemsize
+            self.size * self.max_codebook_size * self.hidden_size * self.dtype.itemsize
         )
 
     def clear_slot(self, slot_index: int):
@@ -261,32 +262,32 @@ def hyper_weight_update_pooled_kernel(
                 embedding_pool_ptr + pool_offset_emb, update_vals, mask=h_mask
             )
 
-        # Update linear weights
-        for v_block in range(0, vocab_size, BLOCK_SIZE_V):
-            v_start = v_block
-            v_end = min(v_start + BLOCK_SIZE_V, vocab_size)
-            v_mask = tl.arange(0, BLOCK_SIZE_V) < (v_end - v_start)
+        # Update linear weights (now using hidden_size instead of vocab_size)
+        for h_block in range(0, hidden_size, BLOCK_SIZE_H):
+            h_start = h_block
+            h_end = min(h_start + BLOCK_SIZE_H, hidden_size)
+            h_mask = tl.arange(0, BLOCK_SIZE_H) < (h_end - h_start)
 
             # Load update values (assuming updates contain both embedding and linear)
             # Offset by hidden_size to get linear part
             update_offset_lin = (
-                update_idx * (hidden_size + vocab_size)
+                update_idx * (hidden_size + hidden_size)  # Both parts are hidden_size
                 + hidden_size
-                + v_start
-                + tl.arange(0, BLOCK_SIZE_V)
+                + h_start
+                + tl.arange(0, BLOCK_SIZE_H)
             )
             update_vals = tl.load(
-                updates_ptr + update_offset_lin, mask=v_mask, other=0.0
+                updates_ptr + update_offset_lin, mask=h_mask, other=0.0
             )
 
             # Store to linear pool
             pool_offset_lin = (
-                pool_slot * max_codebook_size * vocab_size
-                + codebook_idx * vocab_size
-                + v_start
-                + tl.arange(0, BLOCK_SIZE_V)
+                pool_slot * max_codebook_size * hidden_size
+                + codebook_idx * hidden_size
+                + h_start
+                + tl.arange(0, BLOCK_SIZE_H)
             )
-            tl.atomic_add(linear_pool_ptr + pool_offset_lin, update_vals, mask=v_mask)
+            tl.atomic_add(linear_pool_ptr + pool_offset_lin, update_vals, mask=h_mask)
 
 
 def update_hyper_weights_pooled(
@@ -302,8 +303,8 @@ def update_hyper_weights_pooled(
 
     Args:
         embedding_pool: [pool_size, max_codebook_size, hidden_size]
-        linear_pool: [pool_size, max_codebook_size, vocab_size]
-        updates: [total_updates, hidden_size + vocab_size] - flattened updates
+        linear_pool: [pool_size, max_codebook_size, hidden_size]
+        updates: [total_updates, 2 * hidden_size] - flattened updates (embedding + linear)
         updates_indices: [total_updates] - codebook indices for updates
         pool_indices: [num_requests] - pool slot for each request
         req_to_update_mapping: [num_requests, 2] - [start_idx, end_idx] for each request
@@ -311,7 +312,6 @@ def update_hyper_weights_pooled(
     num_requests = pool_indices.shape[0]
     max_codebook_size = embedding_pool.shape[1]
     hidden_size = embedding_pool.shape[2]
-    vocab_size = linear_pool.shape[2]
 
     if num_requests == 0:
         return
@@ -333,8 +333,8 @@ def update_hyper_weights_pooled(
         req_to_update_end,
         max_codebook_size,
         hidden_size,
-        vocab_size,
+        hidden_size,  # Both embedding and linear use hidden_size
         num_requests,
         BLOCK_SIZE_H=64,
-        BLOCK_SIZE_V=64,
+        BLOCK_SIZE_V=64,  # Keep this for compatibility, though we only use BLOCK_SIZE_H now
     )

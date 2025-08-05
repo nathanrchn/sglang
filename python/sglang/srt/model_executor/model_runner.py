@@ -897,22 +897,20 @@ class ModelRunner:
         # Initialize hyper weight pool
         max_codebook_size = self.model_config.zip2zip_config.compression.max_codebook_size
         max_batch_size = self.server_args.max_running_requests or 256  # Default fallback
-        pool_size = max_codebook_size * max_batch_size  # Pool size for hyper weights
         hidden_size = self.model_config.hidden_size
-        hyper_vocab_size = max_codebook_size  # Hyper vocab size, not full model vocab
         
         self.hyper_weight_pool = HyperWeightPool(
-            size=pool_size,
+            size=max_batch_size,
             max_codebook_size=max_codebook_size,
             hidden_size=hidden_size,
-            vocab_size=hyper_vocab_size,  # Use hyper vocab size, not full vocab
+            vocab_size=max_codebook_size,  # This parameter is not used anymore
             dtype=self.dtype,
             device=self.device,
             enable_memory_saver=self.server_args.enable_memory_saver,
         )
         
         self.hyper_weight_allocator = HyperWeightAllocator(
-            size=pool_size,
+            size=max_batch_size,
             max_codebook_size=max_codebook_size,
             dtype=self.dtype,
             device=self.device,

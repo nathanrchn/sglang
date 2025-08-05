@@ -100,14 +100,14 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
                         
                         # Create combined updates (embedding + zeros for linear part)
                         hidden_size = flat_embedding_updates.shape[-1]
-                        vocab_size = forward_batch.hyper_weight_pool.vocab_size
 
                         combined_updates = torch.zeros(
-                            (flat_embedding_updates.shape[0], hidden_size + vocab_size),
+                            (flat_embedding_updates.shape[0], 2 * hidden_size),
                             device=forward_batch.updates.device,
                             dtype=flat_embedding_updates.dtype,
                         )
                         combined_updates[:, :hidden_size] = flat_embedding_updates
+                        # Linear part (second half) remains zeros for embedding layer
 
                         # Update the pool using the efficient Triton kernel
                         update_hyper_weights_pooled(
