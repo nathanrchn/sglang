@@ -295,6 +295,7 @@ class ForwardBatch:
     hyper_weight_pool: Optional[HyperWeightPool] = None
     hyper_weight_pool_indices: Optional[torch.Tensor] = None
     req_to_update_mapping: Optional[torch.Tensor] = None
+    token_to_batch_indices: Optional[torch.Tensor] = None  # Pre-computed batch indices for CUDA graph compatibility
 
     @classmethod
     def init_new(
@@ -433,6 +434,17 @@ class ForwardBatch:
             ret.updates, ret.updates_indices, ret.req_to_update_mapping = model_runner.update_compression_states(batch)
             ret.hyper_weight_pool = model_runner.hyper_weight_pool
             ret.hyper_weight_pool_indices = batch.hyper_weight_pool_indices
+            
+            # Pre-compute token to batch indices for CUDA graph compatibility
+            if ret.seq_lens is not None:
+                seq_lens_sum = ret.seq_lens.sum().item()
+                token_to_batch_indices = torch.zeros(seq_lens_sum, device=device, dtype=torch.long)
+                start_pos = 0
+                for batch_idx, seq_len in enumerate(ret.seq_lens):
+                    end_pos = start_pos + seq_len
+                    token_to_batch_indices[start_pos:end_pos] = batch_idx
+                    start_pos = end_pos
+                ret.token_to_batch_indices = token_to_batch_indices
 
         TboForwardBatchPreparer.prepare(
             ret, is_draft_worker=model_runner.is_draft_worker

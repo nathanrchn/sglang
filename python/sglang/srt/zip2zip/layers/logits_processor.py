@@ -419,12 +419,12 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
 
         # Compute hyper logits using the pool system
         if forward_batch.hyper_weight_pool is not None:
-            # Map token positions to batch indices for continuous batching
-            seq_lens = forward_batch.seq_lens
-            batch_indices = torch.repeat_interleave(
-                torch.arange(forward_batch.batch_size, device=hidden_states.device),
-                seq_lens,
-            )
+            # Use pre-computed batch indices (CUDA graph compatible)
+            if forward_batch.token_to_batch_indices is not None:
+                batch_indices = forward_batch.token_to_batch_indices
+            else:
+                # Fallback for compatibility (should not happen in normal execution)
+                batch_indices = torch.zeros(num_tokens, device=hidden_states.device, dtype=torch.long)
 
             # Get pool indices for each token
             pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]

@@ -572,11 +572,19 @@ class CudaGraphRunner:
                 device=self.model_runner.device,
             )
 
+            # Create placeholder for token_to_batch_indices
+            token_to_batch_indices = torch.zeros(
+                num_tokens,  # Max tokens for this batch size
+                dtype=torch.int64,
+                device=self.model_runner.device,
+            )
+
             forward_batch.updates = updates
             forward_batch.updates_indices = updates_indices
             forward_batch.hyper_weight_pool = self.model_runner.hyper_weight_pool
             forward_batch.hyper_weight_pool_indices = hyper_weight_pool_indices
             forward_batch.req_to_update_mapping = req_to_update_mapping
+            forward_batch.token_to_batch_indices = token_to_batch_indices
 
         # Attention backend
         self.model_runner.attn_backend.init_forward_metadata_capture_cuda_graph(
@@ -714,6 +722,21 @@ class CudaGraphRunner:
             )
         if forward_batch.forward_mode.is_idle() and forward_batch.spec_info is not None:
             forward_batch.spec_info.custom_mask = self.custom_mask
+            
+        # Handle zip2zip specific replay
+        if (self.model_runner.server_args.zip2zip_path is not None and 
+            forward_batch.token_to_batch_indices is not None):
+            # Copy pre-computed token_to_batch_indices to the CUDA graph batch
+            num_tokens = len(forward_batch.token_to_batch_indices)
+            if hasattr(self.forward_batch, 'token_to_batch_indices'):
+                if self.forward_batch.token_to_batch_indices is None:
+                    self.forward_batch.token_to_batch_indices = torch.zeros(
+                        raw_num_token, device=self.model_runner.device, dtype=torch.long
+                    )
+                self.forward_batch.token_to_batch_indices[:num_tokens].copy_(
+                    forward_batch.token_to_batch_indices
+                )
+            
         # Attention backend
         self.model_runner.attn_backend.init_forward_metadata_replay_cuda_graph(
             bs,

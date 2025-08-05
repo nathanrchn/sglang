@@ -125,27 +125,27 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
         ) * base_token_mask.unsqueeze(-1)
 
         # Get hyper embeddings from the pool
-        if forward_batch.hyper_weight_pool is not None and hyper_token_mask.any():
-            # Map token positions to batch indices for continuous batching
-            seq_lens = forward_batch.seq_lens
-            batch_indices = torch.repeat_interleave(
-                torch.arange(forward_batch.batch_size, device=input_.device), seq_lens
-            )
-
-            # Get pool indices for each batch
-            pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]
-
+        if forward_batch.hyper_weight_pool is not None:
             # Create hyper embedding tensor
             hyper_embedding = torch.zeros_like(base_embedding)
-
+            
             if hyper_token_mask.any():
+                # Use pre-computed batch indices (CUDA graph compatible)
+                if forward_batch.token_to_batch_indices is not None:
+                    batch_indices = forward_batch.token_to_batch_indices
+                else:
+                    # Fallback for compatibility (should not happen in normal execution)
+                    num_tokens = input_.shape[0]
+                    batch_indices = torch.zeros(num_tokens, device=input_.device, dtype=torch.long)
+
+                # Get pool indices for each token
+                pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]
+
                 hyper_tokens = hyper_input_ids[hyper_token_mask]
                 hyper_pool_slots = pool_slots[hyper_token_mask]
 
                 # Lookup embeddings from the pool
-                embedding_buffer = (
-                    forward_batch.hyper_weight_pool.get_embedding_buffer()
-                )
+                embedding_buffer = forward_batch.hyper_weight_pool.get_embedding_buffer()
 
                 for i, (token_id, pool_slot) in enumerate(
                     zip(hyper_tokens, hyper_pool_slots)
