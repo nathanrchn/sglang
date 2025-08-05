@@ -5,17 +5,23 @@ This module implements a memory pool system similar to KVCache but for
 hyper embedding and linear weights used in zip2zip compression.
 """
 
+from __future__ import annotations
+
 import abc
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import Optional
 
 import torch
 import triton
 import triton.language as tl
 
-from sglang.srt.utils import GB, TorchMemorySaverAdapter, GPU_MEMORY_TYPE_KV_CACHE
+from sglang.srt.constants import GPU_MEMORY_TYPE_KV_CACHE
+from sglang.srt.torch_memory_saver_adapter import TorchMemorySaverAdapter
 
 logger = logging.getLogger(__name__)
+
+
+GB = 1024 * 1024 * 1024
 
 
 class BaseHyperWeightAllocator(abc.ABC):
@@ -27,7 +33,7 @@ class BaseHyperWeightAllocator(abc.ABC):
         max_codebook_size: int,
         dtype: torch.dtype,
         device: str,
-        hyper_weight_pool: "HyperWeightPool",
+        hyper_weight_pool: HyperWeightPool,
     ):
         self.size = size
         self.max_codebook_size = max_codebook_size
@@ -60,7 +66,7 @@ class HyperWeightAllocator(BaseHyperWeightAllocator):
         max_codebook_size: int,
         dtype: torch.dtype,
         device: str,
-        hyper_weight_pool: "HyperWeightPool",
+        hyper_weight_pool: HyperWeightPool,
     ):
         super().__init__(size, max_codebook_size, dtype, device, hyper_weight_pool)
         self.free_slots = list(range(size))
@@ -133,14 +139,18 @@ class HyperWeightPool:
         with self.memory_saver_adapter.region(GPU_MEMORY_TYPE_KV_CACHE):
             # Hyper embedding weights: [size, max_codebook_size, hidden_size]
             self.embedding_buffer = torch.zeros(
-                (self.size, self.max_codebook_size, self.hidden_size),
+                self.size,
+                self.max_codebook_size,
+                self.hidden_size,
                 dtype=self.dtype,
                 device=self.device,
             )
 
             # Hyper linear weights: [size, max_codebook_size, vocab_size]
             self.linear_buffer = torch.zeros(
-                (self.size, self.max_codebook_size, self.vocab_size),
+                self.size,
+                self.max_codebook_size,
+                self.vocab_size,
                 dtype=self.dtype,
                 device=self.device,
             )

@@ -548,13 +548,12 @@ class CudaGraphRunner:
 
         if self.model_runner.server_args.zip2zip_path is not None:
             model_config = self.model_runner.model_config
-            hidden_size = model_config.hidden_size
-            vocab_size = model_config.vocab_size
+            max_subtokens = model_config.zip2zip_config.compression.max_subtokens
 
             # Create placeholder tensors for CUDA graph capture
             updates = torch.zeros(
-                (0, hidden_size + vocab_size),  # Empty tensor, will be allocated dynamically
-                dtype=model_config.dtype,
+                (0, max_subtokens),  # Empty tensor with token ID shape, will be allocated dynamically
+                dtype=torch.int32,
                 device=self.model_runner.device,
             )
             updates_indices = torch.zeros(

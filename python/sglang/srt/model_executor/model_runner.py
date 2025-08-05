@@ -895,16 +895,17 @@ class ModelRunner:
         )
         
         # Initialize hyper weight pool
-        pool_size = self.server_args.max_total_tokens  # Use same size as token pool
         max_codebook_size = self.model_config.zip2zip_config.compression.max_codebook_size
+        max_batch_size = self.server_args.max_running_requests or 256  # Default fallback
+        pool_size = max_codebook_size * max_batch_size  # Pool size for hyper weights
         hidden_size = self.model_config.hidden_size
-        vocab_size = self.model_config.vocab_size
+        hyper_vocab_size = max_codebook_size  # Hyper vocab size, not full model vocab
         
         self.hyper_weight_pool = HyperWeightPool(
             size=pool_size,
             max_codebook_size=max_codebook_size,
             hidden_size=hidden_size,
-            vocab_size=vocab_size,
+            vocab_size=hyper_vocab_size,  # Use hyper vocab size, not full vocab
             dtype=self.dtype,
             device=self.device,
             enable_memory_saver=self.server_args.enable_memory_saver,
@@ -935,25 +936,30 @@ class ModelRunner:
         
         # Convert to tensors
         if flat_updates:
-            # Assume updates contain both embedding and linear weights
-            hidden_size = self.model_config.hidden_size
-            vocab_size = self.model_config.vocab_size
+            # Updates contain token IDs, need to create proper tensor shape
+            max_subtokens = self.model_config.zip2zip_config.compression.max_subtokens
+            batch_size = len(updates)
+            max_updates_per_batch = max(len(req_updates) for req_updates in updates) if updates else 0
             
-            # Create flattened updates tensor with proper shape
-            # Each update should have size [hidden_size + vocab_size]
-            updates_tensor = torch.zeros(
-                (len(flat_updates), hidden_size + vocab_size),
+            # Create padded updates tensor [total_updates, max_subtokens] with token IDs
+            updates_tensor = torch.full(
+                (len(flat_updates), max_subtokens),
+                fill_value=self.model_config.pad_token_id,  # Pad with pad token
                 device=self.device,
-                dtype=self.dtype
+                dtype=torch.int32
             )
             
-            # Fill in the tensor (this would be populated by the actual encoder)
-            # For now, just create a placeholder
+            # Fill in the actual token IDs
+            for i, update_tokens in enumerate(flat_updates):
+                update_len = min(len(update_tokens), max_subtokens)
+                updates_tensor[i, :update_len] = torch.tensor(
+                    update_tokens[:update_len], dtype=torch.int32
+                )
             
             indices_tensor = torch.tensor(flat_indices, device=self.device, dtype=torch.int32)
         else:
-            updates_tensor = torch.empty((0, self.model_config.hidden_size + self.model_config.vocab_size), 
-                                       device=self.device, dtype=self.dtype)
+            max_subtokens = self.model_config.zip2zip_config.compression.max_subtokens
+            updates_tensor = torch.empty((0, max_subtokens), device=self.device, dtype=torch.int32)
             indices_tensor = torch.empty((0,), device=self.device, dtype=torch.int32)
         
         req_to_update_mapping_tensor = torch.tensor(

@@ -242,12 +242,6 @@ class ForwardBatch:
     # For LoRA
     lora_paths: Optional[List[str]] = None
 
-    # For zip2zip
-    updates: Optional[torch.Tensor] = None
-    updates_indices: Optional[torch.Tensor] = None
-    hyper_embedding_weight: Optional[torch.Tensor] = None
-    hyper_linear_weight: Optional[torch.Tensor] = None
-
     # For input embeddings
     input_embeds: Optional[torch.tensor] = None
 
@@ -298,7 +292,7 @@ class ForwardBatch:
     # For zip2zip
     updates: Optional[torch.Tensor] = None
     updates_indices: Optional[torch.Tensor] = None
-    hyper_weight_pool: Optional["HyperWeightPool"] = None
+    hyper_weight_pool: Optional[HyperWeightPool] = None
     hyper_weight_pool_indices: Optional[torch.Tensor] = None
     req_to_update_mapping: Optional[torch.Tensor] = None
 

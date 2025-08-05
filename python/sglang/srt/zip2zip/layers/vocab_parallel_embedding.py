@@ -47,32 +47,77 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
             forward_batch.updates is not None
             and forward_batch.updates_indices is not None
             and forward_batch.hyper_weight_pool is not None
+            and forward_batch.updates.numel() > 0
         ):
-            # Compute embedding updates using the input encoder
-            embedding_updates = self.input_encoder(
-                forward_batch.updates, self.embed_tokens.weight, self.pad_token_id
-            )
+            # Reshape updates for encoder: from [total_updates, max_subtokens] to [batch_size, max_updates, max_subtokens]
+            batch_size = forward_batch.batch_size
+            total_updates = forward_batch.updates.shape[0]
+            max_subtokens = forward_batch.updates.shape[1]
+            
+            if total_updates > 0:
+                # Find max updates per batch for reshaping
+                req_update_counts = []
+                for i in range(batch_size):
+                    start_idx = forward_batch.req_to_update_mapping[i, 0]
+                    end_idx = forward_batch.req_to_update_mapping[i, 1]
+                    req_update_counts.append(end_idx - start_idx)
+                
+                max_updates_per_batch = max(req_update_counts) if req_update_counts else 0
+                
+                if max_updates_per_batch > 0:
+                    # Create reshaped tensor [batch_size, max_updates, max_subtokens]
+                    reshaped_updates = torch.full(
+                        (batch_size, max_updates_per_batch, max_subtokens),
+                        fill_value=self.pad_token_id,
+                        device=forward_batch.updates.device,
+                        dtype=forward_batch.updates.dtype
+                    )
+                    
+                    # Fill in the actual updates
+                    for i in range(batch_size):
+                        start_idx = forward_batch.req_to_update_mapping[i, 0]
+                        end_idx = forward_batch.req_to_update_mapping[i, 1]
+                        num_updates = end_idx - start_idx
+                        if num_updates > 0:
+                            reshaped_updates[i, :num_updates] = forward_batch.updates[start_idx:end_idx]
+                    
+                    # Compute embedding updates using the input encoder
+                    embedding_updates = self.input_encoder(
+                        reshaped_updates, self.embed_tokens.weight, self.pad_token_id
+                    )
+                    
+                    # Flatten back for the kernel
+                    flat_embedding_updates = []
+                    for i in range(batch_size):
+                        start_idx = forward_batch.req_to_update_mapping[i, 0]
+                        end_idx = forward_batch.req_to_update_mapping[i, 1]
+                        num_updates = end_idx - start_idx
+                        if num_updates > 0:
+                            flat_embedding_updates.append(embedding_updates[i, :num_updates])
+                    
+                    if flat_embedding_updates:
+                        flat_embedding_updates = torch.cat(flat_embedding_updates, dim=0)
+                        
+                        # Create combined updates (embedding + zeros for linear part)
+                        hidden_size = flat_embedding_updates.shape[-1]
+                        vocab_size = forward_batch.hyper_weight_pool.vocab_size
 
-            # Create combined updates (embedding + zeros for linear part)
-            hidden_size = embedding_updates.shape[-1]
-            vocab_size = forward_batch.hyper_weight_pool.vocab_size
+                        combined_updates = torch.zeros(
+                            (flat_embedding_updates.shape[0], hidden_size + vocab_size),
+                            device=forward_batch.updates.device,
+                            dtype=flat_embedding_updates.dtype,
+                        )
+                        combined_updates[:, :hidden_size] = flat_embedding_updates
 
-            combined_updates = torch.zeros(
-                (forward_batch.updates.shape[0], hidden_size + vocab_size),
-                device=forward_batch.updates.device,
-                dtype=embedding_updates.dtype,
-            )
-            combined_updates[:, :hidden_size] = embedding_updates
-
-            # Update the pool using the efficient Triton kernel
-            update_hyper_weights_pooled(
-                forward_batch.hyper_weight_pool.get_embedding_buffer(),
-                forward_batch.hyper_weight_pool.get_linear_buffer(),
-                combined_updates,
-                forward_batch.updates_indices,
-                forward_batch.hyper_weight_pool_indices,
-                forward_batch.req_to_update_mapping,
-            )
+                        # Update the pool using the efficient Triton kernel
+                        update_hyper_weights_pooled(
+                            forward_batch.hyper_weight_pool.get_embedding_buffer(),
+                            forward_batch.hyper_weight_pool.get_linear_buffer(),
+                            combined_updates,
+                            forward_batch.updates_indices,
+                            forward_batch.hyper_weight_pool_indices,
+                            forward_batch.req_to_update_mapping,
+                        )
 
         # Get base embeddings
         base_embedding = self.embed_tokens(
