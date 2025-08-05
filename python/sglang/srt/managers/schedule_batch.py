@@ -891,8 +891,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     hicache_consumer_index: int = 0
 
     # For zip2zip
-    hyper_embedding_weight: Optional[torch.Tensor] = None
-    hyper_linear_weight: Optional[torch.Tensor] = None
+    hyper_weight_pool_indices: Optional[torch.Tensor] = None
 
     @classmethod
     def init_new(
@@ -1909,8 +1908,7 @@ class ModelWorkerBatch:
     # For zip2zip
     updates_list: Optional[List[List[int]]]
     updates_indices_list: Optional[List[List[int]]]
-    hyper_embedding_weight: Optional[torch.Tensor]
-    hyper_linear_weight: Optional[torch.Tensor]
+    hyper_weight_pool_indices: Optional[torch.Tensor]
 
     # Sampling info
     sampling_info: SamplingBatchInfo

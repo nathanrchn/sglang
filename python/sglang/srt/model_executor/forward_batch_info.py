@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from sglang.srt.sampling.sampling_batch_info import SamplingBatchInfo
     from sglang.srt.speculative.eagle_utils import EagleDraftInput, EagleVerifyInput
     from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
+    from sglang.srt.zip2zip.hyper_weight_pool import HyperWeightPool
 
 _is_npu = is_npu()
 
@@ -294,6 +295,13 @@ class ForwardBatch:
     tbo_parent_token_range: Optional[Tuple[int, int]] = None
     tbo_children: Optional[List["ForwardBatch"]] = None
 
+    # For zip2zip
+    updates: Optional[torch.Tensor] = None
+    updates_indices: Optional[torch.Tensor] = None
+    hyper_weight_pool: Optional["HyperWeightPool"] = None
+    hyper_weight_pool_indices: Optional[torch.Tensor] = None
+    req_to_update_mapping: Optional[torch.Tensor] = None
+
     @classmethod
     def init_new(
         cls,
@@ -428,9 +436,9 @@ class ForwardBatch:
             model_runner.lora_manager.prepare_lora_batch(ret)
 
         if model_runner.server_args.zip2zip_path is not None:
-            ret.updates, ret.updates_indices = model_runner.update_compression_states(batch)
-            ret.hyper_embedding_weight = batch.hyper_embedding_weight
-            ret.hyper_linear_weight = batch.hyper_linear_weight
+            ret.updates, ret.updates_indices, ret.req_to_update_mapping = model_runner.update_compression_states(batch)
+            ret.hyper_weight_pool = model_runner.hyper_weight_pool
+            ret.hyper_weight_pool_indices = batch.hyper_weight_pool_indices
 
         TboForwardBatchPreparer.prepare(
             ret, is_draft_worker=model_runner.is_draft_worker

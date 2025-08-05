@@ -8,6 +8,7 @@ from zip2zip.nn.encoders.base import BaseEncoder
 
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from sglang.srt.zip2zip.hyper_weight_pool import update_hyper_weights_pooled
 
 logger = logging.getLogger(__name__)
 
@@ -41,33 +42,75 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
         base_input_ids = input_ * base_token_mask.long()
         hyper_input_ids = (input_ - ivs) * hyper_token_mask.long()
 
-        indices_mask = forward_batch.updates_indices != -1
-
-        updates = self.input_encoder(
-            forward_batch.updates, self.embed_tokens.weight, self.pad_token_id
-        ) * indices_mask.unsqueeze(-1)
-
-        for i in range(input_.size(0)):
-            forward_batch.hyper_embedding_weight.index_add_(
-                0,
-                forward_batch.updates_indices[i] * indices_mask[i],
-                updates[i]
+        # Update hyper embedding weights using the pool system
+        if (
+            forward_batch.updates is not None
+            and forward_batch.updates_indices is not None
+            and forward_batch.hyper_weight_pool is not None
+        ):
+            # Compute embedding updates using the input encoder
+            embedding_updates = self.input_encoder(
+                forward_batch.updates, self.embed_tokens.weight, self.pad_token_id
             )
 
-        batch_offsets = torch.arange(
-            input_.size(0), device=input_.device, dtype=torch.long
-        ).unsqueeze(-1).expand_as(input_) * forward_batch.hyper_embedding_weight.size(1)
+            # Create combined updates (embedding + zeros for linear part)
+            hidden_size = embedding_updates.shape[-1]
+            vocab_size = forward_batch.hyper_weight_pool.vocab_size
 
-        hyper_input_ids += batch_offsets
+            combined_updates = torch.zeros(
+                (forward_batch.updates.shape[0], hidden_size + vocab_size),
+                device=forward_batch.updates.device,
+                dtype=embedding_updates.dtype,
+            )
+            combined_updates[:, :hidden_size] = embedding_updates
+
+            # Update the pool using the efficient Triton kernel
+            update_hyper_weights_pooled(
+                forward_batch.hyper_weight_pool.get_embedding_buffer(),
+                forward_batch.hyper_weight_pool.get_linear_buffer(),
+                combined_updates,
+                forward_batch.updates_indices,
+                forward_batch.hyper_weight_pool_indices,
+                forward_batch.req_to_update_mapping,
+            )
+
+        # Get base embeddings
         base_embedding = self.embed_tokens(
             base_input_ids, forward_batch
         ) * base_token_mask.unsqueeze(-1)
-        hyper_embedding = F.embedding(
-            hyper_input_ids,
-            forward_batch.hyper_embedding_weight.view(
-                -1, self.embed_tokens.embedding_dim
-            ),
-        ) * hyper_token_mask.unsqueeze(-1)
+
+        # Get hyper embeddings from the pool
+        if forward_batch.hyper_weight_pool is not None and hyper_token_mask.any():
+            # Map token positions to batch indices for continuous batching
+            seq_lens = forward_batch.seq_lens
+            batch_indices = torch.repeat_interleave(
+                torch.arange(forward_batch.batch_size, device=input_.device), seq_lens
+            )
+
+            # Get pool indices for each batch
+            pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]
+
+            # Create hyper embedding tensor
+            hyper_embedding = torch.zeros_like(base_embedding)
+
+            if hyper_token_mask.any():
+                hyper_tokens = hyper_input_ids[hyper_token_mask]
+                hyper_pool_slots = pool_slots[hyper_token_mask]
+
+                # Lookup embeddings from the pool
+                embedding_buffer = (
+                    forward_batch.hyper_weight_pool.get_embedding_buffer()
+                )
+
+                for i, (token_id, pool_slot) in enumerate(
+                    zip(hyper_tokens, hyper_pool_slots)
+                ):
+                    if token_id < embedding_buffer.shape[1]:  # Check bounds
+                        hyper_embedding[hyper_token_mask][i] = embedding_buffer[
+                            pool_slot, token_id
+                        ]
+        else:
+            hyper_embedding = torch.zeros_like(base_embedding)
 
         return base_embedding + hyper_embedding
 

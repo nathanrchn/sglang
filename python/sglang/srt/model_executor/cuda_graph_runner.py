@@ -548,41 +548,36 @@ class CudaGraphRunner:
 
         if self.model_runner.server_args.zip2zip_path is not None:
             model_config = self.model_runner.model_config
+            hidden_size = model_config.hidden_size
+            vocab_size = model_config.vocab_size
 
-            hyper_weight_shape = (
-                bs,
-                model_config.zip2zip_config.compression.max_codebook_size,
-                model_config.hidden_size,
-            )
-            hyper_embedding_weight = torch.zeros(
-                hyper_weight_shape,
-                dtype=model_config.dtype,
-                device=self.model_runner.device,
-            )
-            hyper_linear_weight = torch.zeros(
-                hyper_weight_shape,
-                dtype=model_config.dtype,
-                device=self.model_runner.device,
-            )
-
+            # Create placeholder tensors for CUDA graph capture
             updates = torch.zeros(
-                bs,
-                model_config.zip2zip_config.compression.max_codebook_size,
-                model_config.zip2zip_config.compression.max_subtokens,
-                dtype=torch.int32,
+                (0, hidden_size + vocab_size),  # Empty tensor, will be allocated dynamically
+                dtype=model_config.dtype,
                 device=self.model_runner.device,
             )
             updates_indices = torch.zeros(
-                bs,
-                model_config.zip2zip_config.compression.max_codebook_size,
+                (0,),  # Empty tensor, will be allocated dynamically
+                dtype=torch.int32,
+                device=self.model_runner.device,
+            )
+            hyper_weight_pool_indices = torch.zeros(
+                (bs,),  # Pool indices for each request in batch
+                dtype=torch.int64,
+                device=self.model_runner.device,
+            )
+            req_to_update_mapping = torch.zeros(
+                (bs, 2),  # [start, end] mapping for each request
                 dtype=torch.int32,
                 device=self.model_runner.device,
             )
 
             forward_batch.updates = updates
             forward_batch.updates_indices = updates_indices
-            forward_batch.hyper_embedding_weight = hyper_embedding_weight
-            forward_batch.hyper_linear_weight = hyper_linear_weight
+            forward_batch.hyper_weight_pool = self.model_runner.hyper_weight_pool
+            forward_batch.hyper_weight_pool_indices = hyper_weight_pool_indices
+            forward_batch.req_to_update_mapping = req_to_update_mapping
 
         # Attention backend
         self.model_runner.attn_backend.init_forward_metadata_capture_cuda_graph(

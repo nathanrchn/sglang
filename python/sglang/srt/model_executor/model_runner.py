@@ -884,6 +884,8 @@ class ModelRunner:
             return None
         
     def init_zip2zip(self):
+        from sglang.srt.zip2zip.hyper_weight_pool import HyperWeightPool, HyperWeightAllocator
+        
         self.zip2zip_manager = Zip2ZipManager(
             base_model=self.model,
             model_config=self.model_config,
@@ -891,10 +893,74 @@ class ModelRunner:
             dtype=self.dtype,
             device=self.device,
         )
+        
+        # Initialize hyper weight pool
+        pool_size = self.server_args.max_total_tokens  # Use same size as token pool
+        max_codebook_size = self.model_config.zip2zip_config.compression.max_codebook_size
+        hidden_size = self.model_config.hidden_size
+        vocab_size = self.model_config.vocab_size
+        
+        self.hyper_weight_pool = HyperWeightPool(
+            size=pool_size,
+            max_codebook_size=max_codebook_size,
+            hidden_size=hidden_size,
+            vocab_size=vocab_size,
+            dtype=self.dtype,
+            device=self.device,
+            enable_memory_saver=self.server_args.enable_memory_saver,
+        )
+        
+        self.hyper_weight_allocator = HyperWeightAllocator(
+            size=pool_size,
+            max_codebook_size=max_codebook_size,
+            dtype=self.dtype,
+            device=self.device,
+            hyper_weight_pool=self.hyper_weight_pool,
+        )
 
-    def update_compression_states(self, batch: ModelWorkerBatch) -> Tuple[torch.Tensor, torch.Tensor]:
+    def update_compression_states(self, batch: ModelWorkerBatch) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         updates, updates_indices = self.zip2zip_manager.update_compression_states(batch)
-        return torch.tensor(updates, device=self.device).view(batch.bs, -1, self.model_config.zip2zip_config.compression.max_subtokens), torch.tensor(updates_indices, device=self.device)
+        
+        # Flatten all updates and create mapping
+        flat_updates = []
+        flat_indices = []
+        req_to_update_mapping = []
+        
+        update_start = 0
+        for i, (req_updates, req_indices) in enumerate(zip(updates, updates_indices)):
+            req_to_update_mapping.append([update_start, update_start + len(req_updates)])
+            flat_updates.extend(req_updates)
+            flat_indices.extend(req_indices)
+            update_start += len(req_updates)
+        
+        # Convert to tensors
+        if flat_updates:
+            # Assume updates contain both embedding and linear weights
+            hidden_size = self.model_config.hidden_size
+            vocab_size = self.model_config.vocab_size
+            
+            # Create flattened updates tensor with proper shape
+            # Each update should have size [hidden_size + vocab_size]
+            updates_tensor = torch.zeros(
+                (len(flat_updates), hidden_size + vocab_size),
+                device=self.device,
+                dtype=self.dtype
+            )
+            
+            # Fill in the tensor (this would be populated by the actual encoder)
+            # For now, just create a placeholder
+            
+            indices_tensor = torch.tensor(flat_indices, device=self.device, dtype=torch.int32)
+        else:
+            updates_tensor = torch.empty((0, self.model_config.hidden_size + self.model_config.vocab_size), 
+                                       device=self.device, dtype=self.dtype)
+            indices_tensor = torch.empty((0,), device=self.device, dtype=torch.int32)
+        
+        req_to_update_mapping_tensor = torch.tensor(
+            req_to_update_mapping, device=self.device, dtype=torch.int32
+        )
+        
+        return updates_tensor, indices_tensor, req_to_update_mapping_tensor
 
     def init_lora_manager(self):
         self.lora_manager = LoRAManager(

@@ -71,9 +71,35 @@ class Zip2ZipManager:
 
     def update_compression_state(self, state: CompressionState, ids: List[int]) -> None:
         self.codebook_manager.update_codebooks(ids, [state])
-    
-    def update_compression_states_with_next_token_ids(self, states: List[CompressionState], next_token_ids: List[int]) -> None:
+
+    def update_compression_states_with_next_token_ids(
+        self, states: List[CompressionState], next_token_ids: List[int]
+    ) -> None:
         self.codebook_manager.update_codebooks(next_token_ids, states)
+
+    def update_compression_states(
+        self, batch
+    ) -> Tuple[List[List[int]], List[List[int]]]:
+        """Update compression states for a batch and return updates and indices."""
+        # For now, return the updates directly from the batch
+        # This assumes the compression states have already been updated elsewhere
+        # and the batch contains the current updates/indices
+        if hasattr(batch, "updates_list") and batch.updates_list is not None:
+            updates = batch.updates_list
+        else:
+            # Initialize empty updates if not present
+            updates = [[] for _ in range(len(batch.seq_lens))]
+
+        if (
+            hasattr(batch, "updates_indices_list")
+            and batch.updates_indices_list is not None
+        ):
+            updates_indices = batch.updates_indices_list
+        else:
+            # Initialize empty indices if not present
+            updates_indices = [[] for _ in range(len(batch.seq_lens))]
+
+        return updates, updates_indices
 
     def get_pretrained_encoders(
         self, zip2zip_path: str

@@ -35,6 +35,7 @@ from sglang.srt.layers.dp_attention import (
     get_attention_tp_size,
     get_local_attention_dp_size,
 )
+from sglang.srt.zip2zip.hyper_weight_pool import update_hyper_weights_pooled
 
 logger = logging.getLogger(__name__)
 
@@ -308,28 +309,49 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
 
         ivs = self.zip2zip_config.compression.initial_vocab_size
         mcs = self.zip2zip_config.compression.max_codebook_size
+        num_tokens = hidden_states.shape[0]
 
+        # Create logits tensor with correct shape: (num_tokens, vocab_size + mcs)
         logits = torch.empty(
-            forward_batch.batch_size,
+            num_tokens,
             self.config.vocab_size + mcs,
-            hidden_states.shape[-1],
             device=hidden_states.device,
             dtype=hidden_states.dtype,
         )
 
-        indices_mask = forward_batch.updates_indices != -1
-
-        updates = self.output_encoder(
-            forward_batch.updates, lm_head.weight, self.pad_token_id
-        ) * indices_mask.unsqueeze(-1)
-
-        for i in range(forward_batch.batch_size):
-            forward_batch.hyper_linear_weight.index_add_(
-                0,
-                forward_batch.updates_indices[i] * indices_mask[i],
-                updates[i]
+        # Update hyper linear weights using the pool system
+        if (
+            forward_batch.updates is not None
+            and forward_batch.updates_indices is not None
+            and forward_batch.hyper_weight_pool is not None
+        ):
+            # Compute linear updates using the output encoder
+            linear_updates = self.output_encoder(
+                forward_batch.updates, lm_head.weight, self.pad_token_id
             )
 
+            # Create combined updates (zeros for embedding + linear part)
+            hidden_size = forward_batch.hyper_weight_pool.hidden_size
+            vocab_size = linear_updates.shape[-1]
+
+            combined_updates = torch.zeros(
+                (forward_batch.updates.shape[0], hidden_size + vocab_size),
+                device=forward_batch.updates.device,
+                dtype=linear_updates.dtype,
+            )
+            combined_updates[:, hidden_size:] = linear_updates
+
+            # Update the pool using the efficient Triton kernel
+            update_hyper_weights_pooled(
+                forward_batch.hyper_weight_pool.get_embedding_buffer(),
+                forward_batch.hyper_weight_pool.get_linear_buffer(),
+                combined_updates,
+                forward_batch.updates_indices,
+                forward_batch.hyper_weight_pool_indices,
+                forward_batch.req_to_update_mapping,
+            )
+
+        # Compute base logits
         if hasattr(lm_head, "weight"):
             if use_intel_amx_backend(lm_head):
                 output = torch.ops.sgl_kernel.weight_packed_linear(
@@ -347,11 +369,44 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
             # TODO: use weight_packed_linear for GGUF models
             output = lm_head.quant_method.apply(lm_head, hidden_states, embedding_bias)
 
-        logits[..., :ivs] = output[..., :ivs]
-        logits[..., ivs : ivs + mcs] = torch.bmm(
-            hidden_states, forward_batch.hyper_linear_weight.transpose(-2, -1)
-        )
-        logits[..., ivs + mcs :] = output[..., ivs:]
+        # Fill in the logits tensor
+        logits[:, :ivs] = output[:, :ivs]
+
+        # Compute hyper logits using the pool system
+        if forward_batch.hyper_weight_pool is not None:
+            # Map token positions to batch indices for continuous batching
+            seq_lens = forward_batch.seq_lens
+            batch_indices = torch.repeat_interleave(
+                torch.arange(forward_batch.batch_size, device=hidden_states.device),
+                seq_lens,
+            )
+
+            # Get pool indices for each token
+            pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]
+
+            # Get linear buffer from pool
+            linear_buffer = forward_batch.hyper_weight_pool.get_linear_buffer()
+
+            # Compute hyper logits efficiently
+            hyper_logits = torch.zeros(
+                (num_tokens, mcs),
+                device=hidden_states.device,
+                dtype=hidden_states.dtype,
+            )
+
+            for i in range(num_tokens):
+                pool_slot = pool_slots[i]
+                # Matrix multiply: hidden_states[i] @ linear_buffer[pool_slot].T
+                hyper_logits[i] = torch.matmul(
+                    hidden_states[i : i + 1], linear_buffer[pool_slot].T
+                ).squeeze(0)
+
+            logits[:, ivs : ivs + mcs] = hyper_logits
+        else:
+            # No hyper weights, fill with zeros
+            logits[:, ivs : ivs + mcs] = 0
+
+        logits[:, ivs + mcs :] = output[:, ivs:]
 
         if self.logit_scale is not None:
             logits.mul_(self.logit_scale)
