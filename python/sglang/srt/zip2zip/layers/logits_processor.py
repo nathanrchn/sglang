@@ -332,14 +332,14 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
             max_subtokens = forward_batch.updates.shape[1]
             
             if total_updates > 0:
-                # Find max updates per batch for reshaping
-                req_update_counts = []
+                # Find max updates per batch for reshaping (CUDA graph compatible)
+                max_updates_per_batch = 0
                 for i in range(batch_size):
-                    start_idx = forward_batch.req_to_update_mapping[i, 0]
-                    end_idx = forward_batch.req_to_update_mapping[i, 1]
-                    req_update_counts.append(end_idx - start_idx)
-                
-                max_updates_per_batch = max(req_update_counts) if req_update_counts else 0
+                    start_idx = forward_batch.req_to_update_mapping[i, 0].item()
+                    end_idx = forward_batch.req_to_update_mapping[i, 1].item()
+                    num_updates = end_idx - start_idx
+                    if num_updates > max_updates_per_batch:
+                        max_updates_per_batch = num_updates
                 
                 if max_updates_per_batch > 0:
                     # Create reshaped tensor [batch_size, max_updates, max_subtokens]
@@ -363,18 +363,25 @@ class Zip2ZipLogitsProcessor(torch.nn.Module):
                         reshaped_updates, lm_head.weight, self.pad_token_id
                     )
                     
-                    # Flatten back for the kernel
-                    flat_linear_updates = []
+                    # Flatten back for the kernel (CUDA graph compatible)
+                    # Pre-allocate the flattened tensor
+                    flat_linear_updates = torch.zeros(
+                        (total_updates, linear_updates.shape[-1]),
+                        device=linear_updates.device,
+                        dtype=linear_updates.dtype
+                    )
+                    
+                    # Copy updates back to flattened format
+                    flat_idx = 0
                     for i in range(batch_size):
-                        start_idx = forward_batch.req_to_update_mapping[i, 0]
-                        end_idx = forward_batch.req_to_update_mapping[i, 1]
+                        start_idx = forward_batch.req_to_update_mapping[i, 0].item()
+                        end_idx = forward_batch.req_to_update_mapping[i, 1].item()
                         num_updates = end_idx - start_idx
                         if num_updates > 0:
-                            flat_linear_updates.append(linear_updates[i, :num_updates])
+                            flat_linear_updates[flat_idx:flat_idx + num_updates] = linear_updates[i, :num_updates]
+                            flat_idx += num_updates
                     
-                    if flat_linear_updates:
-                        flat_linear_updates = torch.cat(flat_linear_updates, dim=0)
-                        
+                    if total_updates > 0:
                         # Create combined updates (zeros for embedding + linear part)
                         hidden_size = forward_batch.hyper_weight_pool.hidden_size
 

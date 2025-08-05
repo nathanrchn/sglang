@@ -55,14 +55,14 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
             max_subtokens = forward_batch.updates.shape[1]
             
             if total_updates > 0:
-                # Find max updates per batch for reshaping
-                req_update_counts = []
+                # Find max updates per batch for reshaping (CUDA graph compatible)
+                max_updates_per_batch = 0
                 for i in range(batch_size):
-                    start_idx = forward_batch.req_to_update_mapping[i, 0]
-                    end_idx = forward_batch.req_to_update_mapping[i, 1]
-                    req_update_counts.append(end_idx - start_idx)
-                
-                max_updates_per_batch = max(req_update_counts) if req_update_counts else 0
+                    start_idx = forward_batch.req_to_update_mapping[i, 0].item()
+                    end_idx = forward_batch.req_to_update_mapping[i, 1].item()
+                    num_updates = end_idx - start_idx
+                    if num_updates > max_updates_per_batch:
+                        max_updates_per_batch = num_updates
                 
                 if max_updates_per_batch > 0:
                     # Create reshaped tensor [batch_size, max_updates, max_subtokens]
@@ -86,18 +86,25 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
                         reshaped_updates, self.embed_tokens.weight, self.pad_token_id
                     )
                     
-                    # Flatten back for the kernel
-                    flat_embedding_updates = []
+                    # Flatten back for the kernel (CUDA graph compatible)
+                    # Pre-allocate the flattened tensor
+                    flat_embedding_updates = torch.zeros(
+                        (total_updates, embedding_updates.shape[-1]),
+                        device=embedding_updates.device,
+                        dtype=embedding_updates.dtype
+                    )
+                    
+                    # Copy updates back to flattened format
+                    flat_idx = 0
                     for i in range(batch_size):
-                        start_idx = forward_batch.req_to_update_mapping[i, 0]
-                        end_idx = forward_batch.req_to_update_mapping[i, 1]
+                        start_idx = forward_batch.req_to_update_mapping[i, 0].item()
+                        end_idx = forward_batch.req_to_update_mapping[i, 1].item()
                         num_updates = end_idx - start_idx
                         if num_updates > 0:
-                            flat_embedding_updates.append(embedding_updates[i, :num_updates])
+                            flat_embedding_updates[flat_idx:flat_idx + num_updates] = embedding_updates[i, :num_updates]
+                            flat_idx += num_updates
                     
-                    if flat_embedding_updates:
-                        flat_embedding_updates = torch.cat(flat_embedding_updates, dim=0)
-                        
+                    if total_updates > 0:
                         # Create combined updates (embedding + zeros for linear part)
                         hidden_size = flat_embedding_updates.shape[-1]
 
@@ -129,31 +136,27 @@ class Zip2ZipVocabParallelEmbedding(torch.nn.Module):
             # Create hyper embedding tensor
             hyper_embedding = torch.zeros_like(base_embedding)
             
-            if hyper_token_mask.any():
-                # Use pre-computed batch indices (CUDA graph compatible)
-                if forward_batch.token_to_batch_indices is not None:
-                    batch_indices = forward_batch.token_to_batch_indices
-                else:
-                    # Fallback for compatibility (should not happen in normal execution)
-                    num_tokens = input_.shape[0]
-                    batch_indices = torch.zeros(num_tokens, device=input_.device, dtype=torch.long)
+            # Use pre-computed batch indices (CUDA graph compatible)
+            if forward_batch.token_to_batch_indices is not None:
+                batch_indices = forward_batch.token_to_batch_indices
+            else:
+                # Fallback for compatibility (should not happen in normal execution)
+                num_tokens = input_.shape[0]
+                batch_indices = torch.zeros(num_tokens, device=input_.device, dtype=torch.long)
 
-                # Get pool indices for each token
-                pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]
+            # Get pool indices for each token
+            pool_slots = forward_batch.hyper_weight_pool_indices[batch_indices]
 
-                hyper_tokens = hyper_input_ids[hyper_token_mask]
-                hyper_pool_slots = pool_slots[hyper_token_mask]
+            # Lookup embeddings from the pool (avoid dynamic indexing)
+            embedding_buffer = forward_batch.hyper_weight_pool.get_embedding_buffer()
 
-                # Lookup embeddings from the pool
-                embedding_buffer = forward_batch.hyper_weight_pool.get_embedding_buffer()
-
-                for i, (token_id, pool_slot) in enumerate(
-                    zip(hyper_tokens, hyper_pool_slots)
-                ):
+            # Process each token individually to avoid dynamic boolean indexing
+            for i in range(len(hyper_input_ids)):
+                if hyper_token_mask[i]:  # Check if this token is a hyper token
+                    token_id = hyper_input_ids[i]
+                    pool_slot = pool_slots[i]
                     if token_id < embedding_buffer.shape[1]:  # Check bounds
-                        hyper_embedding[hyper_token_mask][i] = embedding_buffer[
-                            pool_slot, token_id
-                        ]
+                        hyper_embedding[i] = embedding_buffer[pool_slot, token_id]
         else:
             hyper_embedding = torch.zeros_like(base_embedding)
 
