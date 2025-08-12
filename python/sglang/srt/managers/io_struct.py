@@ -42,6 +42,7 @@ class SessionParams:
     offset: Optional[int] = None
     replace: Optional[bool] = None
     drop_previous_output: Optional[bool] = None
+    resume_grammar: Optional[bool] = None
 
 
 # Type definitions for multimodal input data

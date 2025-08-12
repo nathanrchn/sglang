@@ -25,7 +25,7 @@ import multiprocessing as mp
 import os
 import signal
 import threading
-from typing import AsyncIterator, Dict, Iterator, List, Optional, Tuple, Union
+from typing import AsyncIterator, Dict, Iterator, List, Optional, Tuple, Union, Callable, Any
 
 import zmq
 import zmq.asyncio
@@ -57,12 +57,18 @@ from sglang.srt.managers.io_struct import (
     UpdateWeightFromDiskReqInput,
     UpdateWeightsFromDistributedReqInput,
     UpdateWeightsFromTensorReqInput,
+    SessionParams,
+    OpenSessionReqInput,
+    CloseSessionReqInput,
 )
+from sglang.srt.entrypoints.openai.protocol import Tool
+from sglang.srt.function_call.core_types import ToolCallItem
 from sglang.srt.managers.scheduler import run_scheduler_process
 from sglang.srt.managers.template_manager import TemplateManager
 from sglang.srt.managers.tokenizer_manager import TokenizerManager
 from sglang.srt.server_args import PortArgs, ServerArgs
 from sglang.srt.torch_memory_saver_adapter import TorchMemorySaverAdapter
+from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from sglang.srt.utils import (
     MultiprocessingSerializer,
     assert_pkg_version,
@@ -214,6 +220,144 @@ class Engine(EngineBase):
         else:
             ret = loop.run_until_complete(generator.__anext__())
             return ret
+        
+    def generate_single_with_tools(
+        self,
+        tools: List[Tool],
+        tools_server: Callable[[Dict[str, ToolCallItem]], List[int]],
+        tools_stop_tokens_ids: Optional[List[int]] = None,
+        # The input prompt. It can be a single prompt or a batch of prompts.
+        prompt: Optional[Union[List[str], str]] = None,
+        sampling_params: Optional[Union[List[Dict], Dict]] = None,
+        # The token ids for text; one can either specify text or input_ids.
+        input_ids: Optional[Union[List[List[int]], List[int]]] = None,
+        # The image input. It can be an image instance, file name, URL, or base64 encoded string.
+        # Can be formatted as:
+        # - Single image for a single request
+        # - List of images (one per request in a batch)
+        # - List of lists of images (multiple images per request)
+        # See also python/sglang/srt/utils.py:load_image for more details.
+        image_data: Optional[MultimodalDataInputFormat] = None,
+        audio_data: Optional[MultimodalDataInputFormat] = None,
+        video_data: Optional[MultimodalDataInputFormat] = None,
+        return_logprob: Optional[Union[List[bool], bool]] = False,
+        logprob_start_len: Optional[Union[List[int], int]] = None,
+        top_logprobs_num: Optional[Union[List[int], int]] = None,
+        token_ids_logprob: Optional[Union[List[List[int]], List[int]]] = None,
+        lora_path: Optional[List[Optional[str]]] = None,
+        custom_logit_processor: Optional[Union[List[str], str]] = None,
+        return_hidden_states: bool = False,
+        stream: bool = False,
+        bootstrap_host: Optional[Union[List[str], str]] = None,
+        bootstrap_port: Optional[Union[List[int], int]] = None,
+        bootstrap_room: Optional[Union[List[int], int]] = None,
+        data_parallel_rank: Optional[int] = None,
+    ) -> Union[Dict, Iterator[Dict]]:
+        if self.server_args.enable_dp_attention:
+            if data_parallel_rank is None:
+                logger.debug("data_parallel_rank not provided, using default dispatch")
+            elif data_parallel_rank < 0:
+                raise ValueError("data_parallel_rank must be non-negative")
+            elif data_parallel_rank >= self.server_args.dp_size:
+                raise ValueError(
+                    f"data_parallel_rank must be less than dp_size: {self.server_args.dp_size}"
+                )
+
+        function_call_parser = FunctionCallParser(tools, tool_call_parser=self.server_args.tool_call_parser)
+
+        gen_req = GenerateReqInput(
+            text=prompt,
+            input_ids=input_ids,
+            sampling_params=sampling_params,
+            image_data=image_data,
+            audio_data=audio_data,
+            video_data=video_data,
+            return_logprob=return_logprob,
+            logprob_start_len=logprob_start_len,
+            top_logprobs_num=top_logprobs_num,
+            token_ids_logprob=token_ids_logprob,
+            lora_path=lora_path,
+            custom_logit_processor=custom_logit_processor,
+            return_hidden_states=return_hidden_states,
+            stream=stream,
+            bootstrap_host=bootstrap_host,
+            bootstrap_port=bootstrap_port,
+            bootstrap_room=bootstrap_room,
+            data_parallel_rank=data_parallel_rank,
+            session_params=session_params,
+        )
+
+        loop = asyncio.get_event_loop()
+
+        # Initialize session
+        session_id = loop.run_until_complete(self.tokenizer_manager.open_session(obj=OpenSessionReqInput(capacity_of_str_len=-1)))
+
+        # Generation loop
+        session_params = SessionParams(
+            id=session_id,
+            resume_grammar=True,
+        )
+
+        if tools_stop_tokens_ids is not None:
+            if "stop_token_ids" not in sampling_params:
+                sampling_params["stop_token_ids"] = []
+            sampling_params["stop_token_ids"].extend(tools_stop_tokens_ids)
+
+        blocks: List[Dict] = []
+
+        while True:
+            generator = self.tokenizer_manager.generate_request(gen_req, None)
+
+            block = loop.run_until_complete(generator.__anext__())
+            meta_info = block["meta_info"]
+            rid = meta_info["id"]
+
+            stopped_for_tool = False
+            if function_call_parser.has_tool_call(block["text"]):
+                stopped_for_tool = True
+
+            blocks.append(block)
+
+            if not stopped_for_tool:
+                break
+
+            _, tool_calls = function_call_parser.parse_non_stream(block["text"])
+            new_ids = tools_server(tool_calls)
+
+            if session_params.rid is None:
+                session_params.rid = rid
+
+            gen_req = GenerateReqInput(
+                input_ids=new_ids,
+                sampling_params=sampling_params,
+                stream=gen_req.stream,
+                return_logprob=gen_req.return_logprob,
+                logprob_start_len=gen_req.logprob_start_len,
+                top_logprobs_num=gen_req.top_logprobs_num,
+                return_text_in_logprobs=gen_req.return_text_in_logprobs,
+                return_hidden_states=gen_req.return_hidden_states,
+                background=gen_req.background,
+                session_params=session_params,
+            )
+
+            # Update sampling params with reduced max_tokens
+            if hasattr(sampling_params, "max_new_tokens") or isinstance(
+                sampling_params, dict
+            ):
+                context_len = getattr(
+                    self.tokenizer_manager.model_config, "context_len", 4096
+                )
+                remaining_tokens = context_len - len(new_ids) - 1
+
+                if isinstance(sampling_params, dict):
+                    sampling_params["max_new_tokens"] = max(remaining_tokens, 1)
+                else:
+                    sampling_params.max_new_tokens = max(remaining_tokens, 1)
+
+
+        self.tokenizer_manager.close_session(obj=CloseSessionReqInput(session_id=session_id))
+
+        return blocks
 
     async def async_generate(
         self,

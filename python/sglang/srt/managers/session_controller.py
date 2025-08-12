@@ -149,6 +149,9 @@ class Session:
             new_req.multimodal_inputs = last_req.multimodal_inputs
         new_req.tokenizer = tokenizer
 
+        if session_params.resume_grammar:
+            new_req.grammar = last_req.grammar
+
         if abort:
             new_req.set_finish_with_abort("Invalid request session id")
         else:
