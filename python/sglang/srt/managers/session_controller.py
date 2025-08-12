@@ -137,20 +137,22 @@ class Session:
             origin_input_ids=input_ids,
             origin_input_ids_unpadded=input_ids_unpadded,
             sampling_params=req.sampling_params,
-            lora_path=req.lora_path,
+            lora_id=req.lora_id,
             session_id=self.session_id,
             custom_logit_processor=req.custom_logit_processor,
             stream=req.stream,
             return_logprob=req.return_logprob,
             top_logprobs_num=req.top_logprobs_num,
             token_ids_logprob=req.token_ids_logprob,
+            vocab_size=len(tokenizer.get_vocab()),
         )
         if last_req is not None:
             new_req.multimodal_inputs = last_req.multimodal_inputs
-        new_req.tokenizer = tokenizer
 
-        if session_params.resume_grammar:
-            new_req.grammar = last_req.grammar
+            if session_params.resume_grammar:
+                new_req.grammar = last_req.grammar
+
+        new_req.tokenizer = tokenizer
 
         if abort:
             new_req.set_finish_with_abort("Invalid request session id")

@@ -224,7 +224,7 @@ class Engine(EngineBase):
     def generate_single_with_tools(
         self,
         tools: List[Tool],
-        tools_server: Callable[[Dict[str, ToolCallItem]], List[int]],
+        tools_server: Callable[[List[ToolCallItem]], str],
         tools_stop_tokens_ids: Optional[List[int]] = None,
         # The input prompt. It can be a single prompt or a batch of prompts.
         prompt: Optional[Union[List[str], str]] = None,
@@ -265,6 +265,10 @@ class Engine(EngineBase):
 
         function_call_parser = FunctionCallParser(tools, tool_call_parser=self.server_args.tool_call_parser)
 
+        loop = asyncio.get_event_loop()
+
+        session_id = loop.run_until_complete(self.tokenizer_manager.open_session(obj=OpenSessionReqInput(capacity_of_str_len=-1)))
+
         gen_req = GenerateReqInput(
             text=prompt,
             input_ids=input_ids,
@@ -284,18 +288,7 @@ class Engine(EngineBase):
             bootstrap_port=bootstrap_port,
             bootstrap_room=bootstrap_room,
             data_parallel_rank=data_parallel_rank,
-            session_params=session_params,
-        )
-
-        loop = asyncio.get_event_loop()
-
-        # Initialize session
-        session_id = loop.run_until_complete(self.tokenizer_manager.open_session(obj=OpenSessionReqInput(capacity_of_str_len=-1)))
-
-        # Generation loop
-        session_params = SessionParams(
-            id=session_id,
-            resume_grammar=True,
+            session_params={"id": session_id, "resume_grammar": True},
         )
 
         if tools_stop_tokens_ids is not None:
@@ -322,40 +315,32 @@ class Engine(EngineBase):
                 break
 
             _, tool_calls = function_call_parser.parse_non_stream(block["text"])
-            new_ids = tools_server(tool_calls)
+            text = tools_server(tool_calls)
 
-            if session_params.rid is None:
-                session_params.rid = rid
+            blocks.append({"text": text, "meta_info": {"id": rid}})
 
             gen_req = GenerateReqInput(
-                input_ids=new_ids,
+                text=text,
                 sampling_params=sampling_params,
                 stream=gen_req.stream,
                 return_logprob=gen_req.return_logprob,
                 logprob_start_len=gen_req.logprob_start_len,
+                lora_path=gen_req.lora_path,
+                custom_logit_processor=gen_req.custom_logit_processor,
                 top_logprobs_num=gen_req.top_logprobs_num,
                 return_text_in_logprobs=gen_req.return_text_in_logprobs,
                 return_hidden_states=gen_req.return_hidden_states,
-                background=gen_req.background,
-                session_params=session_params,
+                session_params={"id": session_id, "rid": rid, "resume_grammar": True},
             )
 
             # Update sampling params with reduced max_tokens
             if hasattr(sampling_params, "max_new_tokens") or isinstance(
                 sampling_params, dict
             ):
-                context_len = getattr(
-                    self.tokenizer_manager.model_config, "context_len", 4096
-                )
-                remaining_tokens = context_len - len(new_ids) - 1
-
-                if isinstance(sampling_params, dict):
-                    sampling_params["max_new_tokens"] = max(remaining_tokens, 1)
-                else:
-                    sampling_params.max_new_tokens = max(remaining_tokens, 1)
+                raise NotImplementedError("max_new_tokens is not supported for tools")
 
 
-        self.tokenizer_manager.close_session(obj=CloseSessionReqInput(session_id=session_id))
+        loop.run_until_complete(self.tokenizer_manager.close_session(obj=CloseSessionReqInput(session_id=session_id)))
 
         return blocks
 
