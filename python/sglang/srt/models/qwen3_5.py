@@ -55,6 +55,7 @@ from sglang.srt.layers.linear import (
     RowParallelLinear,
 )
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
+from sglang.srt.layers.moe_lm_head import MoELMHead
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.radix_attention import RadixAttention
 from sglang.srt.layers.radix_linear_attention import RadixLinearAttention
@@ -1045,14 +1046,33 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration):
 
         self.deepstack_visual_indexes = self.visual.deepstack_visual_indexes
 
+        # Optionally replace lm_head with MoE lm_head
+        lm_head_num_experts = getattr(self.config, "lm_head_num_experts", None)
+        lm_head_top_k = getattr(self.config, "lm_head_top_k", None)
+        if (
+            lm_head_num_experts is not None
+            and lm_head_top_k is not None
+            and self.pp_group.is_last_rank
+        ):
+            self.lm_head = MoELMHead(
+                vocab_size=self.config.vocab_size,
+                hidden_size=self.config.hidden_size,
+                num_experts=lm_head_num_experts,
+                top_k=lm_head_top_k,
+                prefix=add_prefix("lm_head", prefix),
+            )
+
     def get_embed_and_head(self):
+        if isinstance(self.lm_head, MoELMHead):
+            return self.model.embed_tokens.weight, None
         return self.model.embed_tokens.weight, self.lm_head.weight
 
     def set_embed_and_head(self, embed, head):
         del self.model.embed_tokens.weight
-        del self.lm_head.weight
         self.model.embed_tokens.weight = embed
-        self.lm_head.weight = head
+        if not isinstance(self.lm_head, MoELMHead):
+            del self.lm_head.weight
+            self.lm_head.weight = head
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
@@ -1068,6 +1088,7 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration):
 
         loaded_params: Set[str] = set()
         params_dict = dict(self.named_parameters(remove_duplicate=False))
+        use_moe_lm_head = isinstance(self.lm_head, MoELMHead)
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
@@ -1077,6 +1098,14 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration):
                 name = name.replace(r"model.language_model.", r"model.")
             if ".self_attn." in name:
                 name = name.replace(".self_attn", "")
+
+            # Remap standard lm_head.weight to MoE lm_head expert_weight
+            if use_moe_lm_head and name == "lm_head.weight":
+                param = params_dict["lm_head.expert_weight"]
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight)
+                loaded_params.add(name)
+                continue
 
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
@@ -1137,14 +1166,33 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
 
         self.deepstack_visual_indexes = self.visual.deepstack_visual_indexes
 
+        # Optionally replace lm_head with MoE lm_head
+        lm_head_num_experts = getattr(self.config, "lm_head_num_experts", None)
+        lm_head_top_k = getattr(self.config, "lm_head_top_k", None)
+        if (
+            lm_head_num_experts is not None
+            and lm_head_top_k is not None
+            and self.pp_group.is_last_rank
+        ):
+            self.lm_head = MoELMHead(
+                vocab_size=self.config.vocab_size,
+                hidden_size=self.config.hidden_size,
+                num_experts=lm_head_num_experts,
+                top_k=lm_head_top_k,
+                prefix=add_prefix("lm_head", prefix),
+            )
+
     def get_embed_and_head(self):
+        if isinstance(self.lm_head, MoELMHead):
+            return self.model.embed_tokens.weight, None
         return self.model.embed_tokens.weight, self.lm_head.weight
 
     def set_embed_and_head(self, embed, head):
         del self.model.embed_tokens.weight
-        del self.lm_head.weight
         self.model.embed_tokens.weight = embed
-        self.lm_head.weight = head
+        if not isinstance(self.lm_head, MoELMHead):
+            del self.lm_head.weight
+            self.lm_head.weight = head
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
@@ -1210,6 +1258,7 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
 
         loaded_params: Set[str] = set()
         params_dict = dict(self.named_parameters(remove_duplicate=False))
+        use_moe_lm_head = isinstance(self.lm_head, MoELMHead)
 
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
@@ -1220,6 +1269,14 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
                 name = name.replace(r"model.language_model.", r"model.")
             if ".self_attn." in name:
                 name = name.replace(".self_attn", "")
+
+            # Remap standard lm_head.weight to MoE lm_head expert_weight
+            if use_moe_lm_head and name == "lm_head.weight":
+                param = params_dict["lm_head.expert_weight"]
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight)
+                loaded_params.add(name)
+                continue
 
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if name.endswith("experts.gate_up_proj") or name.endswith(

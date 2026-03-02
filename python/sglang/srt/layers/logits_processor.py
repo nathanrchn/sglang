@@ -48,6 +48,7 @@ from sglang.srt.layers.utils.logprob import (
     get_top_logprobs_chunk,
     get_top_logprobs_prefill,
 )
+from sglang.srt.layers.moe_lm_head import MoELMHead
 from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from sglang.srt.model_executor.forward_batch_info import (
     CaptureHiddenMode,
@@ -828,7 +829,7 @@ class LogitsProcessor(nn.Module):
         if self.logit_scale is not None:
             logits.mul_(self.logit_scale)
 
-        if self.do_tensor_parallel_all_gather:
+        if self.do_tensor_parallel_all_gather and not isinstance(lm_head, MoELMHead):
             if self.use_attn_tp_group:
                 logits = self._gather_attn_tp_logits(logits)
             else:
@@ -856,6 +857,8 @@ class LogitsProcessor(nn.Module):
         lm_head: VocabParallelEmbedding,
         embedding_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if isinstance(lm_head, MoELMHead):
+            return lm_head(hidden_states)
         if hasattr(lm_head, "set_lora") and hasattr(lm_head, "apply_lora"):
             # This is a LoRA-wrapped module, use its forward method
             logits = lm_head(hidden_states)
