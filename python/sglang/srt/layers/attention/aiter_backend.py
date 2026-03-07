@@ -21,6 +21,8 @@ from sglang.srt.layers.dp_attention import (
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, ForwardMode
 from sglang.srt.utils import is_gfx95_supported
 
+from sglang.srt.layers.radix_attention import AttentionType
+
 if TYPE_CHECKING:
     from sglang.srt.layers.radix_attention import RadixAttention
     from sglang.srt.model_executor.model_runner import ModelRunner
@@ -1415,6 +1417,13 @@ class AiterAttnBackend(AttentionBackend):
         save_kv_cache=True,
         sinks=None,
     ):
+        if layer.is_cross_attention or layer.attn_type == AttentionType.ENCODER_ONLY:
+            causal = False
+        else:
+            causal = True
+        if layer.attn_type == AttentionType.ENCODER_ONLY:
+            save_kv_cache = False
+
         cache_loc = (
             forward_batch.out_cache_loc
             if not layer.is_cross_attention
@@ -1538,7 +1547,7 @@ class AiterAttnBackend(AttentionBackend):
                             max_q_len,
                             max_q_len,
                             softmax_scale=layer.scaling,
-                            causal=True,
+                            causal=causal,
                         )
                     return output
                 elif layer.qk_head_dim != (kv_lora_rank + qk_rope_head_dim):
@@ -1798,7 +1807,7 @@ class AiterAttnBackend(AttentionBackend):
                 self.forward_metadata.kv_indices,
                 self.forward_metadata.max_q_len,
                 self.forward_metadata.max_kv_len,
-                causal=True,
+                causal=causal,
                 logits_soft_cap=self.logits_soft_cap,
                 alibi_slopes=None,
                 return_lse=False,
