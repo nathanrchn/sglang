@@ -1418,7 +1418,6 @@ class AiterAttnBackend(AttentionBackend):
     ):
         if layer.attn_type == AttentionType.ENCODER_ONLY:
             causal = False
-            save_kv_cache = False
         else:
             causal = not layer.is_cross_attention
 
