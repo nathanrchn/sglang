@@ -508,7 +508,7 @@ class MiniMaxM2MoE(nn.Module):
 
         self.layer_id = layer_id
 
-        if get_moe_a2a_backend().is_deepep():
+        if get_moe_a2a_backend().is_deepep() or get_moe_a2a_backend().is_mori():
             self.ep_size = get_moe_expert_parallel_world_size()
             self.top_k = config.num_experts_per_tok
 
@@ -527,6 +527,7 @@ class MiniMaxM2MoE(nn.Module):
         if (
             not get_moe_a2a_backend().is_deepep()
             and not get_moe_a2a_backend().is_ascend_fuseep()
+            and not get_moe_a2a_backend().is_mori()
         ):
             return self.forward_normal(
                 hidden_states, should_allreduce_fusion, use_reduce_scatter
